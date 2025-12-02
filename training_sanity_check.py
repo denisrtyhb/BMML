@@ -61,6 +61,11 @@ def sanity_check(num_samples=8):
     grid = make_grid(grid, nrow=num_samples, padding=2)
     
     # Plot and save
+    # Add left-side subtitles for each row: Original, Masked, Denoised
+    for i, label in enumerate(["Original", "Masked", "Denoised"]):
+        # The y-coordinate is centered for each row block
+        y = (i + 0.5) / 3
+        plt.figtext(0.04, 1 - y, label, va="center", ha="right", fontsize=16, weight='bold', rotation=90)
     plt.figure(figsize=(15, 5))
     plt.imshow(grid.permute(1, 2, 0).cpu().numpy(), cmap='gray')
     plt.axis('off')
