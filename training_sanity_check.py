@@ -24,10 +24,7 @@ def sanity_check(model_path='checkpoints/simpliest_unet.pth', num_samples=8):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
     # Load model
-    checkpoint = torch.load(model_path, map_location=device)
-    model = UNet(**checkpoint['init_args']).to(device)
-    model.load_state_dict(checkpoint['state_dict'])
-    
+    model = UNet.load_checkpoint(model_path)
     # Load dataset
     transform = transforms.Compose([
         transforms.Resize((28, 28)),
