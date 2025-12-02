@@ -10,51 +10,51 @@ from torchvision.utils import make_grid
 class MaskedDiffusionTrainer:
     def __init__(self, model, image_size=32, channels=3, device='cuda', 
                  num_timesteps=1000, beta_start=0.0001, beta_end=0.02):
+        """
+        Masked Diffusion Trainer.
+        
+        For masked diffusion:
+        - t=0: Original image (x_0)
+        - t=1: Fully masked image (masked pixels = 0, unmasked pixels = original)
+        - Forward process: x_t = (1 - t) * x_0 + t * (mask * x_0)
+          where mask: 1 = preserve pixel, 0 = mask pixel
+        """
         self.model = model
         self.image_size = image_size
         self.channels = channels
         self.device = device
         self.num_timesteps = num_timesteps
         
-        # Linear noise schedule
-        self.betas = torch.linspace(beta_start, beta_end, num_timesteps).to(device)
-        self.alphas = 1.0 - self.betas
-        self.alphas_cumprod = torch.cumprod(self.alphas, dim=0)
-        self.alphas_cumprod_prev = F.pad(self.alphas_cumprod[:-1], (1, 0), value=1.0)
-        self.sqrt_alphas_cumprod = torch.sqrt(self.alphas_cumprod)
-        self.sqrt_one_minus_alphas_cumprod = torch.sqrt(1.0 - self.alphas_cumprod)
-        
-        # For sampling
-        self.posterior_variance = self.betas * (1.0 - self.alphas_cumprod_prev) / (1.0 - self.alphas_cumprod)
+        # Time schedule: t goes from 0 to 1
+        # We'll use discrete timesteps 0 to num_timesteps-1, normalized to [0, 1]
+        self.timesteps = torch.linspace(0, 1, num_timesteps).to(device)
         
         self.optimizer = None
         
-    def q_sample(self, x_start, t, noise=None, mask=None):
+    def q_sample(self, x_start, t, mask):
         """
         Forward diffusion process with masking.
-        Only adds noise to unmasked regions.
+        
+        At timestep t:
+        - t=0: x_t = x_start (original image)
+        - t=1: x_t = mask * x_start (fully masked: masked pixels = 0, preserved pixels = original)
+        
+        Formula: x_t = (1 - t) * x_start + t * (mask * x_start)
+                 = ((1 - t) + t * mask) * x_start
         
         Args:
             x_start: Original images [B, C, H, W]
-            t: Timesteps [B]
-            noise: Optional noise tensor
-            mask: Binary mask [B, 1, H, W], 1 = preserve, 0 = corrupt
+            t: Timestep indices [B] (integer indices 0 to num_timesteps-1)
+            mask: Binary mask [B, 1, H, W], 1 = preserve pixel, 0 = mask pixel
         """
-        if noise is None:
-            noise = torch.randn_like(x_start)
+        # Convert integer timestep indices to continuous values in [0, 1]
+        t_continuous = t.float() / (self.num_timesteps - 1)  # [B]
+        t_continuous = t_continuous.view(-1, 1, 1, 1)  # [B, 1, 1, 1]
         
-        sqrt_alphas_cumprod_t = self.sqrt_alphas_cumprod[t].view(-1, 1, 1, 1)
-        sqrt_one_minus_alphas_cumprod_t = self.sqrt_one_minus_alphas_cumprod[t].view(-1, 1, 1, 1)
-        
-        # Add noise to unmasked regions
-        if mask is not None:
-            # mask: 1 = preserve (keep original), 0 = corrupt (add noise)
-            noisy = sqrt_alphas_cumprod_t * x_start + sqrt_one_minus_alphas_cumprod_t * noise
-            # Preserve masked regions, corrupt unmasked regions
-            x_t = mask * x_start + (1 - mask) * noisy
-        else:
-            # Standard diffusion (no masking)
-            x_t = sqrt_alphas_cumprod_t * x_start + sqrt_one_minus_alphas_cumprod_t * noise
+        # Forward process: x_t = ((1 - t) + t * mask) * x_start
+        # At t=0: x_t = x_start (full image)
+        # At t=1: x_t = mask * x_start (masked image)
+        x_t = ((1 - t_continuous) + t_continuous * mask) * x_start
         
         return x_t
     
@@ -98,62 +98,70 @@ class MaskedDiffusionTrainer:
         
         return mask
     
-    def p_sample(self, x_t, t, mask=None, guidance_scale=1.0):
+    def p_sample(self, x_t, t, mask, guidance_scale=1.0):
         """
         Reverse diffusion step (sampling).
         
+        The model predicts x_0 (original image) from x_t (masked image at timestep t).
+        We then compute x_{t-1} using the forward process formula.
+        
         Args:
-            x_t: Noisy image at timestep t [B, C, H, W]
-            t: Timestep [B]
-            mask: Binary mask (1 = preserve, 0 = generate) [B, 1, H, W]
+            x_t: Masked image at timestep t [B, C, H, W]
+            t: Timestep indices [B] (integer indices)
+            mask: Binary mask [B, 1, H, W], 1 = preserve pixel, 0 = mask pixel
         """
-        # Predict noise
-        predicted_noise = self.model(x_t, t, mask)
-        
-        # Compute coefficients
-        alpha_t = self.alphas[t].view(-1, 1, 1, 1)
-        alpha_cumprod_t = self.alphas_cumprod[t].view(-1, 1, 1, 1)
-        beta_t = self.betas[t].view(-1, 1, 1, 1)
-        
-        # Predict x_0
-        pred_x_start = (x_t - torch.sqrt(1 - alpha_cumprod_t) * predicted_noise) / torch.sqrt(alpha_cumprod_t)
+        # Predict original image x_0
+        pred_x_start = self.model(x_t, t, mask)
         
         # Clip to valid range
         pred_x_start = torch.clamp(pred_x_start, -1, 1)
         
-        # Compute mean of posterior
-        alpha_cumprod_prev = self.alphas_cumprod_prev[t].view(-1, 1, 1, 1)
-        posterior_mean = (
-            torch.sqrt(alpha_cumprod_prev) * 
-            beta_t / (1.0 - alpha_cumprod_t) * pred_x_start +
-            torch.sqrt(alpha_t) * (1.0 - alpha_cumprod_prev) / 
-            (1.0 - alpha_cumprod_t) * x_t
-        )
+        # Compute x_{t-1} using forward process formula
+        # If t > 0, we go back one step
+        # x_{t-1} = ((1 - t_prev) + t_prev * mask) * pred_x_start
         
-        # Sample
-        posterior_variance_t = self.posterior_variance[t].view(-1, 1, 1, 1)
-        noise = torch.randn_like(x_t)
-        x_prev = posterior_mean + torch.sqrt(posterior_variance_t) * noise
+        # Get previous timestep
+        t_prev = torch.clamp(t - 1, min=0).float() / (self.num_timesteps - 1)  # [B]
+        t_prev = t_prev.view(-1, 1, 1, 1)  # [B, 1, 1, 1]
         
-        # Preserve masked regions
-        if mask is not None:
-            # For masked regions, we want to keep them close to original
-            # In practice, we blend the predicted value with the original
-            # This is a simplified approach - more sophisticated methods exist
-            x_prev = mask * x_t + (1 - mask) * x_prev
+        # Apply forward process formula to get x_{t-1}
+        x_prev = ((1 - t_prev) + t_prev * mask) * pred_x_start
+        
+        # For preserved pixels (mask=1), we can optionally keep them from x_t
+        # This ensures consistency during reverse process
+        # x_prev = mask * x_t + (1 - mask) * x_prev
         
         return x_prev
     
-    def p_sample_loop(self, shape, mask=None, guidance_scale=1.0):
+    def p_sample_loop(self, shape, mask, guidance_scale=1.0):
         """
         Full reverse diffusion process.
         
+        Start from fully masked image (t=num_timesteps-1) and denoise to original (t=0).
+        
+        At t=1 (fully masked): x_1 = mask * x_0
+        - Preserved pixels (mask=1): keep original value (but we don't know x_0 yet)
+        - Masked pixels (mask=0): are 0
+        
+        For generation:
+        - If mask has preserved pixels, we need to know their values (inpainting case)
+        - If mask is all zeros, we generate from scratch (all pixels start at 0)
+        
         Args:
             shape: Shape of samples [B, C, H, W]
-            mask: Binary mask (1 = preserve, 0 = generate)
+            mask: Binary mask [B, 1, H, W], 1 = preserve pixel, 0 = mask pixel
         """
         b = shape[0]
-        img = torch.randn(shape, device=self.device)
+        
+        # Start from fully masked image at t=1
+        # x_1 = mask * x_0, so for masked pixels (mask=0), x_1 = 0
+        # For preserved pixels (mask=1), x_1 = x_0, but we don't know x_0 yet
+        # So we start with zeros everywhere, and the model will predict x_0
+        img = torch.zeros(shape, device=self.device)
+        
+        # If we have preserved pixels (for inpainting), we should initialize them
+        # But for generation from scratch, mask should be all zeros
+        # For now, we'll let the model handle it
         
         for i in tqdm(reversed(range(0, self.num_timesteps)), desc='Sampling'):
             t = torch.full((b,), i, device=self.device, dtype=torch.long)
@@ -184,14 +192,14 @@ class MaskedDiffusionTrainer:
         
         Args:
             x_start: Original image [B, C, H, W]
-            mask: Binary mask (1 = preserve, 0 = inpaint) [B, 1, H, W]
+            mask: Binary mask [B, 1, H, W], 1 = preserve pixel, 0 = inpaint pixel
             num_steps: Number of sampling steps (default: full process)
             guidance_scale: Guidance scale
         """
         self.model.eval()
         num_steps = num_steps or self.num_timesteps
         
-        # Add noise to unmasked regions only
+        # Start from fully masked version
         t = torch.full((x_start.shape[0],), num_steps - 1, device=self.device, dtype=torch.long)
         x_t = self.q_sample(x_start, t, mask=mask)
         
@@ -207,30 +215,31 @@ class MaskedDiffusionTrainer:
         """
         Single training step.
         
+        The model learns to predict the original image x_0 from the masked image x_t.
+        
         Args:
             x_start: Original images [B, C, H, W]
-            mask: Binary mask [B, 1, H, W]
+            mask: Binary mask [B, 1, H, W], 1 = preserve pixel, 0 = mask pixel
         """
         b = x_start.shape[0]
         
         # Sample random timesteps
         t = torch.randint(0, self.num_timesteps, (b,), device=self.device).long()
         
-        # Sample noise
-        noise = torch.randn_like(x_start)
+        # Forward diffusion with masking: get x_t
+        x_t = self.q_sample(x_start, t, mask=mask)
         
-        # Forward diffusion with masking
-        x_t = self.q_sample(x_start, t, noise=noise, mask=mask)
+        # Model predicts original image x_0
+        pred_x_start = self.model(x_t, t, mask)
         
-        # Predict noise
-        predicted_noise = self.model(x_t, t, mask)
+        # Loss: MSE between predicted and actual original image
+        # We can compute loss only on masked regions (where we need to predict)
+        # or on all regions. Let's use all regions for simplicity.
+        loss = F.mse_loss(pred_x_start, x_start)
         
-        # Loss: only on unmasked regions
-        if mask is not None:
-            loss_mask = (1 - mask).expand_as(noise)
-            loss = F.mse_loss(predicted_noise * loss_mask, noise * loss_mask, reduction='sum') / loss_mask.sum()
-        else:
-            loss = F.mse_loss(predicted_noise, noise)
+        # Alternatively, focus loss on masked regions only:
+        # loss_mask = (1 - mask).expand_as(x_start)  # 1 for masked pixels, 0 for preserved
+        # loss = F.mse_loss(pred_x_start * loss_mask, x_start * loss_mask, reduction='sum') / (loss_mask.sum() + 1e-8)
         
         return loss
     

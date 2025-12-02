@@ -53,7 +53,13 @@ class Block(nn.Module):
 class UNet(nn.Module):
     """
     UNet architecture for masked diffusion.
-    Takes noisy image, timestep, and mask as inputs.
+    
+    Takes masked image x_t, timestep t, and mask as inputs.
+    Predicts the original image x_0.
+    
+    Architecture:
+    - Input: masked image [B, C, H, W] + mask [B, 1, H, W] = [B, C+1, H, W]
+    - Output: predicted original image [B, C, H, W]
     """
     def __init__(self, in_channels=3, out_channels=3, image_size=32, 
                  base_channels=64, time_embed_dim=128):
@@ -94,9 +100,12 @@ class UNet(nn.Module):
         Forward pass.
         
         Args:
-            x: Noisy image [B, C, H, W]
-            timestep: Timestep [B]
-            mask: Binary mask [B, 1, H, W] (1 = preserve, 0 = generate)
+            x: Masked image at timestep t [B, C, H, W]
+            timestep: Timestep indices [B] (integer indices 0 to num_timesteps-1)
+            mask: Binary mask [B, 1, H, W] (1 = preserve pixel, 0 = mask pixel)
+        
+        Returns:
+            Predicted original image x_0 [B, C, H, W]
         """
         # Time embedding
         t = self.time_mlp(timestep)
@@ -133,3 +142,45 @@ class UNet(nn.Module):
         
         return output
 
+class TestUNet(nn.Module):
+
+
+    def __init__(self):
+        super().__init__()
+        self.model = UNet(in_channels=3, out_channels=3, base_channels=32)
+    def test_unet_forward_no_mask(self):
+        batch_size = 1
+        h = w = 32
+        x = torch.randn(batch_size, 3, h, w)
+        t = torch.randint(0, 1000, (batch_size,))
+        out = self.model(x, t, None)
+        assert out.shape == (batch_size, 3, h, w), "Model output shape mismatch without mask"
+
+    def test_unet_forward_minimal_timestep(self):
+        batch_size = 1
+        h = w = 32
+        x = torch.randn(batch_size, 3, h, w)
+        t = torch.zeros((batch_size,), dtype=torch.long)
+        mask = torch.ones(batch_size, 1, h, w)
+        out = self.model(x, t, mask)
+        assert out.shape == (batch_size, 3, h, w)
+
+    def test_unet_input_output_shape(self):
+        batch_size = 2
+        height = width = 32
+        x = torch.randn(batch_size, 3, height, width)
+        t = torch.randint(0, 1000, (batch_size,))
+        mask = torch.randint(0, 2, (batch_size, 1, height, width)).float()
+        out = self.model(x, t, mask)
+        assert out.shape == (batch_size, 3, height, width), f"Unexpected output shape {out.shape}"
+
+    def run_all_tests(self):
+        self.test_unet_input_output_shape()
+        self.test_unet_forward_no_mask()
+        self.test_unet_forward_minimal_timestep()
+        print("All UNet tests passed.")
+
+
+if __name__ == "__main__":
+    test_unet = TestUNet()
+    test_unet.run_all_tests()
