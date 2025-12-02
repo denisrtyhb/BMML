@@ -133,8 +133,17 @@ class UNet(nn.Module):
         bot = F.relu(self.bot3(bot))
         
         # Upsampling with skip connections
+        # Need to ensure spatial dimensions match for concatenation
         up1 = self.up1(torch.cat((bot, down3), dim=1), t)
+        
+        # Resize up1 to match down2's spatial dimensions if needed
+        if up1.shape[2:] != down2.shape[2:]:
+            up1 = F.interpolate(up1, size=down2.shape[2:], mode='bilinear', align_corners=False)
         up2 = self.up2(torch.cat((up1, down2), dim=1), t)
+        
+        # Resize up2 to match down1's spatial dimensions if needed
+        if up2.shape[2:] != down1.shape[2:]:
+            up2 = F.interpolate(up2, size=down1.shape[2:], mode='bilinear', align_corners=False)
         up3 = self.up3(torch.cat((up2, down1), dim=1), t)
         
         # Output
