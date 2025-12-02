@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
+import os
 
 class SinusoidalPositionEmbeddings(nn.Module):
     """Sinusoidal positional embeddings for timesteps"""
@@ -155,6 +156,10 @@ class UNet(nn.Module):
         return output
     
     def save_checkpoint(self, path):
+        # Create the directory for the checkpoint if it doesn't exist
+        dirpath = os.path.dirname(path)
+        if dirpath and not os.path.exists(dirpath):
+            os.makedirs(dirpath)
         state_dict = self.state_dict()
         init_args = {
             'in_channels': self.in_channels,
