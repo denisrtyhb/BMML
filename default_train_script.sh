@@ -8,7 +8,7 @@ echo "=========================================="
 echo ""
 
 # Set default parameters for test run
-BATCH_SIZE=32
+BATCH_SIZE=256
 EPOCHS=5
 LEARNING_RATE=1e-4
 IMAGE_SIZE=32

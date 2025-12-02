@@ -69,7 +69,7 @@ def train():
         transforms.Normalize([0.5], [0.5])  # Normalize to [-1, 1]
     ])
     dataset = datasets.MNIST('./data', train=True, download=True, transform=transform)
-    dataloader = DataLoader(dataset, batch_size=64, shuffle=True)
+    dataloader = DataLoader(dataset, batch_size=256, shuffle=True)
     
     # Training loop
     num_epochs = 10

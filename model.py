@@ -66,6 +66,9 @@ class UNet(nn.Module):
         super().__init__()
         self.image_size = image_size
         self.time_embed_dim = time_embed_dim
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.base_channels = base_channels
         
         # Time embedding
         self.time_mlp = nn.Sequential(
