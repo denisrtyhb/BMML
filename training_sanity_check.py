@@ -20,7 +20,7 @@ def denoise(model, x_t, t, mask, device):
         pred_x_0 = model(x_t, t, mask)
     return pred_x_0
 
-def sanity_check(num_samples=8):
+def sanity_check_denosing(num_samples=8):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
     # Load model
@@ -74,5 +74,23 @@ def sanity_check(num_samples=8):
     plt.savefig('sanity_check.png', dpi=150, bbox_inches='tight')
     print(f"Saved sanity check to sanity_check.png")
 
+def sanity_check_sampling(num_samples=8):
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    model = UNet.load_checkpoint(MODEL_PATH).to(device)
+    model.eval()
+    with torch.no_grad():
+        samples = model.sample(num_samples)
+    # Prepare for visualization (denormalize to [0, 1])
+    samples_viz = (samples + 1) / 2.0
+    grid = make_grid(samples_viz, nrow=num_samples, padding=2)
+    plt.figure(figsize=(15, 5))
+    plt.imshow(grid.permute(1, 2, 0).cpu().numpy(), cmap='gray')
+    plt.axis('off')
+    plt.title('Samples')
+    plt.tight_layout()
+    plt.savefig('sanity_check_sampling.png', dpi=150, bbox_inches='tight')
+    print(f"Saved sanity check to sanity_check_sampling.png")
+
 if __name__ == '__main__':
-    sanity_check()
+    sanity_check_denosing()
+    sanity_check_sampling()
