@@ -150,6 +150,32 @@ class UNet(nn.Module):
         output = self.output(up3)
         
         return output
+    
+    def save_checkpoint(self, path):
+        state_dict = self.state_dict()
+        init_args = {
+            'in_channels': self.in_channels,
+            'out_channels': self.out_channels,
+            'image_size': self.image_size,
+            'base_channels': self.base_channels,
+            'time_embed_dim': self.time_embed_dim
+        }
+        torch.save({
+            'state_dict': state_dict,
+            'init_args': init_args
+        }, path)
+    
+    def load_checkpoint(path):
+        checkpoint = torch.load(path)
+        model = UNet(
+            in_channels=checkpoint['model_init_args']['in_channels'],
+            out_channels=checkpoint['model_init_args']['out_channels'],
+            image_size=checkpoint['model_init_args']['image_size'],
+            base_channels=checkpoint['model_init_args']['base_channels'],
+            time_embed_dim=checkpoint['model_init_args']['time_embed_dim']
+        )
+        model.load_state_dict(checkpoint['state_dict'])
+        return model
 
 class TestUNet(nn.Module):
 

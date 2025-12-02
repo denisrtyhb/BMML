@@ -105,6 +105,7 @@ def train():
         print(f'Epoch {epoch+1}/{num_epochs}, Average Loss: {avg_loss:.4f}')
     
     print("Training complete!")
+    model.save_checkpoint('checkpoints/simpliest_unet.pth')
 
 if __name__ == '__main__':
     train()
