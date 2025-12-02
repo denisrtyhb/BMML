@@ -76,8 +76,8 @@ def sanity_check_denosing(num_samples=8):
     print(f"Saved sanity check to sanity_check_denosing.png")
 
 def sample_images(model, num_samples=8, num_steps=10):
-    before = torch.zeros(num_samples, 1, 28, 28)
-    mask = torch.ones(num_samples, 1, 28, 28)
+    before = torch.zeros(num_samples, 1, 28, 28, device=device)
+    mask = torch.ones(num_samples, 1, 28, 28, device=device)
     for i in range(num_steps-1, -1, -1):
         t = torch.full((num_samples,), i, device=device, dtype=torch.long)
         with torch.no_grad():
