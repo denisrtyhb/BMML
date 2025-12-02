@@ -176,11 +176,11 @@ class UNet(nn.Module):
     def load_checkpoint(path):
         checkpoint = torch.load(path)
         model = UNet(
-            in_channels=checkpoint['model_init_args']['in_channels'],
-            out_channels=checkpoint['model_init_args']['out_channels'],
-            image_size=checkpoint['model_init_args']['image_size'],
-            base_channels=checkpoint['model_init_args']['base_channels'],
-            time_embed_dim=checkpoint['model_init_args']['time_embed_dim']
+            in_channels=checkpoint['init_args']['in_channels'],
+            out_channels=checkpoint['init_args']['out_channels'],
+            image_size=checkpoint['init_args']['image_size'],
+            base_channels=checkpoint['init_args']['base_channels'],
+            time_embed_dim=checkpoint['init_args']['time_embed_dim']
         )
         model.load_state_dict(checkpoint['state_dict'])
         return model
