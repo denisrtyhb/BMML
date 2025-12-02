@@ -75,33 +75,45 @@ def sanity_check_denosing(num_samples=8):
     plt.savefig('sanity_check_denosing.png', dpi=150, bbox_inches='tight')
     print(f"Saved sanity check to sanity_check_denosing.png")
 
-def sample_images(model, num_samples=8, num_steps=10):
+def sample_images(model, num_samples=1, num_steps=10):
+    # Instead of just returning the final sample, collect the images at each step and return all of them as a tensor of shape [num_steps+1, num_samples, 1, 28, 28]
+    trajectory = []
     before = torch.zeros(num_samples, 1, 28, 28, device=device)
     mask = torch.ones(num_samples, 1, 28, 28, device=device)
+    trajectory.append(before.clone())
     for i in range(num_steps-1, -1, -1):
         t = torch.full((num_samples,), i, device=device, dtype=torch.long)
         with torch.no_grad():
             pred = model(before, t, mask)
-        
-        #select 1/num_steps pixels, that were masked, and fill them, updating the mask
+        # select 1/num_steps pixels, that were masked, and fill them, updating the mask
         unmask_indices = torch.randint(0, num_samples, (num_samples//num_steps,))
         before[unmask_indices] = pred[unmask_indices]
         mask[unmask_indices] = 0
-    return before
+        trajectory.append(before.clone())
+    # Stack along first dimension: shape [num_steps+1, num_samples, 1, 28, 28]
+    trajectory = torch.stack(trajectory, dim=0)
+    return trajectory
 
 def sanity_check_sampling(num_samples=8, num_steps=10):
     
     model = UNet.load_checkpoint(MODEL_PATH).to(device)
     model.eval()
     
-    samples = sample_images(model, num_samples=num_samples, num_steps=num_steps)
+    samples = sample_images(model, num_samples=num_samples, num_steps=num_steps)  # [num_steps+1, num_samples, 1, 28, 28]
     samples = torch.clamp(samples, -1, 1)
-    samples_viz = (samples + 1) / 2.0
-    grid = make_grid(samples_viz, nrow=num_samples, padding=2)
-    plt.figure(figsize=(15, 5))
+    samples_viz = (samples + 1) / 2.0  # [num_steps+1, num_samples, 1, 28, 28]
+
+    # Make a grid such that each row is a trajectory over time for a single sample
+    # Rearrange: [num_steps+1, num_samples, ...] -> [num_samples, num_steps+1, ...]
+    samples_viz = samples_viz.permute(1, 0, 2, 3, 4)  # [num_samples, num_steps+1, 1, 28, 28]
+    # Flatten trajectories: for each sample, concatenate each step along width
+    samples_viz = samples_viz.reshape(num_samples * (num_steps + 1), 1, 28, 28)
+    # Make grid: num_samples rows, num_steps+1 columns
+    grid = make_grid(samples_viz, nrow=num_steps + 1, padding=2)
+    plt.figure(figsize=(2 * (num_steps + 1), 2 * num_samples))
     plt.imshow(grid.permute(1, 2, 0).cpu().numpy(), cmap='gray')
     plt.axis('off')
-    plt.title('Samples')
+    plt.title('Sampling Trajectories (Each Row: Time Steps for One Sample)')
     plt.tight_layout()
     plt.savefig('sanity_check_sampling.png', dpi=150, bbox_inches='tight')
     print(f"Saved sanity check to sanity_check_sampling.png")
