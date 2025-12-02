@@ -39,7 +39,7 @@ def sanity_check(num_samples=8):
     images = images.to(device)  # [B, 1, 28, 28]
     
     # Apply masking (like in training)
-    t = torch.full((num_samples,), 999, device=device)  # High timestep = more masking
+    t = torch.randint(0, 1000, (num_samples,), device=device)  # Random timestep for each sample
     prob_zero = t.float().view(-1, 1, 1, 1) / 1000.0
     random_tensor = torch.rand(num_samples, 1, 28, 28, device=device)
     mask = (random_tensor > prob_zero).float()
