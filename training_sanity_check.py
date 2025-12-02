@@ -24,7 +24,50 @@ def denoise(model, x_t, t, mask, device):
         pred_x_0 = model(x_t, t, mask)
     return pred_x_0
 
-def sanity_check_denosing(num_samples=16):
+def denoise_one_step_based_on_mask(model, before, mask, t, num_to_unmask=None):
+    assert before.shape == (1, 28, 28), f"Before shape: {before.shape}"
+    assert mask.shape == (1, 28, 28), f"Mask shape: {mask.shape}"
+    
+    pred = denoise(model, before.unsqueeze(0), t.unsqueeze(0), mask.unsqueeze(0), device)[0]
+
+    new_pred = pred[mask == 1]
+    print(f"Pred stats: {new_pred.min()=} {new_pred.max()=} {new_pred.mean()=} {new_pred.std()=}")
+    after = before.clone()
+    
+    if num_to_unmask is not None:
+        masked_candidates = (1-mask).nonzero(as_tuple=False)
+        print(f"Unmask {num_to_unmask} pixels out of {len(masked_candidates)}")
+        unmask_indices = masked_candidates[torch.randperm(len(masked_candidates))[:num_to_unmask]]
+
+        x = unmask_indices[:, 0]
+        y = unmask_indices[:, 1]
+        z = unmask_indices[:, 2]
+
+        after[x, y, z] = pred[x, y, z].clamp(-1, 1)
+        mask[x, y, z] = 1
+    else:
+        print(f"{(mask > 0).sum()=}")
+        after[mask == 1] = pred[mask == 1].clamp(-1, 1)
+        mask[mask == 1] = 1
+
+        # return pred * mask + before * (1 - mask), mask
+
+    return after, mask
+
+def denoise_full_trajectory_based_on_mask(model, before, mask, t, num_steps):
+    # return denoise_one_step_based_on_mask(model, before, mask, t, num_to_unmask=int((1-mask).sum().item()))[0].unsqueeze(0)
+    trajectory = []
+    print("New trajectory")
+    for i in range(num_steps-1, -1, -1):
+        num_to_unmask = int((1-mask).sum().item() // (i + 1))
+        print(f"{num_to_unmask=}")
+        before, mask = denoise_one_step_based_on_mask(
+            model, before, mask,
+            t * (i + 1) / num_steps, num_to_unmask=num_to_unmask)
+        trajectory.append(before.clone())
+    return torch.stack(trajectory, dim=0)
+
+def sanity_check_denosing(num_samples=1):
     # Load model
     model = UNet.load_checkpoint(MODEL_PATH).to(device)
     # Load dataset
@@ -46,7 +89,7 @@ def sanity_check_denosing(num_samples=16):
     print("Stats for images: ", images.min(), images.max(), images.mean(), images.std())
     
     # Apply masking (like in training)
-    t = torch.randint(900, 1000, (num_samples,), device=device)  # Random timestep for each sample
+    t = torch.randint(1, 1000, (num_samples,), device=device)  # Random timestep for each sample
     prob_zero = t.float().view(-1, 1, 1, 1) / 1000.0
     random_tensor = torch.rand(num_samples, 1, 28, 28, device=device)
     mask = (random_tensor > prob_zero).float()
@@ -56,7 +99,27 @@ def sanity_check_denosing(num_samples=16):
     # Forward process: create masked images
     masked = forward_process(images, t, mask)
     # Denoise
-    denoised = denoise(model, masked, t, mask, device)
+    use_denoise_full_trajectory = True
+    interface_check = True
+    if use_denoise_full_trajectory:
+        print(mask[0].shape)
+        denoised = [
+            denoise_full_trajectory_based_on_mask(model, masked[i], mask[i], t[i], num_steps=1)
+                for i in range(num_samples)]
+        print(type(denoised))
+        print([type(i) for i in denoised])
+        denoised = torch.stack(denoised, dim=0)[:, 0, :, :, :]
+    elif interface_check:
+        print(mask[0].shape)
+        denoised = [
+            denoise_one_step_based_on_mask(model, masked[i], mask[i], t[i], num_to_unmask=int((1-mask[i]).sum().item()))[0]
+                for i in range(num_samples)]
+        print(type(denoised))
+        print([type(i) for i in denoised])
+        denoised = torch.stack(denoised, dim=0)
+
+    else:
+        denoised = denoise(model, masked, t, mask, device)
     
     # Prepare for visualization (denormalize to [0, 1])
     images_viz = (images + 1) / 2.0
@@ -81,27 +144,6 @@ def sanity_check_denosing(num_samples=16):
     plt.savefig('sanity_check_denosing.png', dpi=150, bbox_inches='tight')
     print(f"Saved sanity check to sanity_check_denosing.png")
 
-def sample_one_step_based_on_mask(model, before, mask, t, cur=1):
-    assert before.shape == (1, 28, 28), f"Before shape: {before.shape}"
-    assert mask.shape == (1, 28, 28), f"Mask shape: {mask.shape}"
-    
-    
-    pred = denoise(model, before.unsqueeze(0), t, mask.unsqueeze(0), device)[0]
-
-    after = before.clone()
-    masked_candidates = mask.nonzero(as_tuple=False)
-    if masked_candidates.numel() > 0:
-        num_to_unmask = int((mask.sum() // (cur + 1)).item())
-        unmask_indices = masked_candidates[torch.randperm(len(masked_candidates))[:num_to_unmask]]
-
-        x = unmask_indices[:, 0]
-        y = unmask_indices[:, 1]
-        z = unmask_indices[:, 2]
-
-        after[x, y, z] = pred[x, y, z].clamp(-1, 1)
-        mask[x, y, z] = 0
-    return after, mask
-
 def sample_images(model, num_samples=1, num_steps=10):
     # Instead of just returning the final sample, collect the images at each step and return all of them as a tensor of shape [num_steps+1, num_samples, 1, 28, 28]
     trajectory = []
@@ -110,18 +152,8 @@ def sample_images(model, num_samples=1, num_steps=10):
         before = torch.zeros(1, 28, 28, device=device)
         mask = torch.ones(1, 28, 28, device=device)
 
-        cur_trajectory = []
-        cur_trajectory.append(before.clone())
-        for i in range(num_steps-1, -1, -1):
-            t = torch.full((1,), i * 1000 / num_steps, device=device, dtype=torch.long)
-            before, mask = sample_one_step_based_on_mask(model, before, mask, t, cur=i)
-            
-            cur_trajectory.append(before.clone())
-        trajectory.append(torch.stack(cur_trajectory, dim=0))
-    
-    # Merge all trajectories into a single tensor
-    print(type(trajectory))
-    print([type(i) for i in trajectory])
+        trajectory.append(denoise_full_trajectory_based_on_mask(
+            model, before, mask, t, num_steps))
     trajectory = torch.stack(trajectory, dim=0)
     return trajectory.permute(1, 0, 2, 3, 4)
 
@@ -151,4 +183,4 @@ def sanity_check_sampling(num_samples=10, num_steps=10):
 
 if __name__ == '__main__':
     sanity_check_denosing()
-    sanity_check_sampling()
+    # sanity_check_sampling()
