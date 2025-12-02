@@ -8,7 +8,10 @@ from model import UNet
 import sys
 
 MODEL_PATH = sys.argv[1]
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
+# device = 'cuda' if torch.cuda.is_available() else 'cpu'
+device = 'cpu'
+seed = 42
+torch.manual_seed(seed)
 
 def forward_process(x_0, t, mask):
     """Apply masking: x_t = mask * x_0"""
@@ -21,9 +24,7 @@ def denoise(model, x_t, t, mask, device):
         pred_x_0 = model(x_t, t, mask)
     return pred_x_0
 
-def sanity_check_denosing(num_samples=8):
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    
+def sanity_check_denosing(num_samples=16):
     # Load model
     model = UNet.load_checkpoint(MODEL_PATH).to(device)
     # Load dataset
@@ -38,9 +39,14 @@ def sanity_check_denosing(num_samples=8):
     # Get samples
     images, _ = next(iter(dataloader))
     images = images.to(device)  # [B, 1, 28, 28]
+    # Adding just a bit of noise
+    images = images + torch.randn_like(images) * 0.1
+    print("LUL")
+
+    print("Stats for images: ", images.min(), images.max(), images.mean(), images.std())
     
     # Apply masking (like in training)
-    t = torch.randint(0, 1000, (num_samples,), device=device)  # Random timestep for each sample
+    t = torch.randint(900, 1000, (num_samples,), device=device)  # Random timestep for each sample
     prob_zero = t.float().view(-1, 1, 1, 1) / 1000.0
     random_tensor = torch.rand(num_samples, 1, 28, 28, device=device)
     mask = (random_tensor > prob_zero).float()
@@ -75,26 +81,51 @@ def sanity_check_denosing(num_samples=8):
     plt.savefig('sanity_check_denosing.png', dpi=150, bbox_inches='tight')
     print(f"Saved sanity check to sanity_check_denosing.png")
 
+def sample_one_step_based_on_mask(model, before, mask, t, cur=1):
+    assert before.shape == (1, 28, 28), f"Before shape: {before.shape}"
+    assert mask.shape == (1, 28, 28), f"Mask shape: {mask.shape}"
+    
+    
+    pred = denoise(model, before.unsqueeze(0), t, mask.unsqueeze(0), device)[0]
+
+    after = before.clone()
+    masked_candidates = mask.nonzero(as_tuple=False)
+    if masked_candidates.numel() > 0:
+        num_to_unmask = int((mask.sum() // (cur + 1)).item())
+        unmask_indices = masked_candidates[torch.randperm(len(masked_candidates))[:num_to_unmask]]
+
+        x = unmask_indices[:, 0]
+        y = unmask_indices[:, 1]
+        z = unmask_indices[:, 2]
+
+        after[x, y, z] = pred[x, y, z].clamp(-1, 1)
+        mask[x, y, z] = 0
+    return after, mask
+
 def sample_images(model, num_samples=1, num_steps=10):
     # Instead of just returning the final sample, collect the images at each step and return all of them as a tensor of shape [num_steps+1, num_samples, 1, 28, 28]
     trajectory = []
-    before = torch.zeros(num_samples, 1, 28, 28, device=device)
-    mask = torch.ones(num_samples, 1, 28, 28, device=device)
-    trajectory.append(before.clone())
-    for i in range(num_steps-1, -1, -1):
-        t = torch.full((num_samples,), i, device=device, dtype=torch.long)
-        with torch.no_grad():
-            pred = model(before, t, mask)
-        # select 1/num_steps pixels, that were masked, and fill them, updating the mask
-        unmask_indices = torch.randint(0, num_samples, (num_samples//num_steps,))
-        before[unmask_indices] = pred[unmask_indices]
-        mask[unmask_indices] = 0
-        trajectory.append(before.clone())
-    # Stack along first dimension: shape [num_steps+1, num_samples, 1, 28, 28]
-    trajectory = torch.stack(trajectory, dim=0)
-    return trajectory
+    for sample in range(num_samples):
+        
+        before = torch.zeros(1, 28, 28, device=device)
+        mask = torch.ones(1, 28, 28, device=device)
 
-def sanity_check_sampling(num_samples=8, num_steps=10):
+        cur_trajectory = []
+        cur_trajectory.append(before.clone())
+        for i in range(num_steps-1, -1, -1):
+            t = torch.full((1,), i * 1000 / num_steps, device=device, dtype=torch.long)
+            before, mask = sample_one_step_based_on_mask(model, before, mask, t, cur=i)
+            
+            cur_trajectory.append(before.clone())
+        trajectory.append(torch.stack(cur_trajectory, dim=0))
+    
+    # Merge all trajectories into a single tensor
+    print(type(trajectory))
+    print([type(i) for i in trajectory])
+    trajectory = torch.stack(trajectory, dim=0)
+    return trajectory.permute(1, 0, 2, 3, 4)
+
+def sanity_check_sampling(num_samples=10, num_steps=10):
     
     model = UNet.load_checkpoint(MODEL_PATH).to(device)
     model.eval()
