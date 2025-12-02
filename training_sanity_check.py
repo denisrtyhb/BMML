@@ -8,6 +8,7 @@ from model import UNet
 import sys
 
 MODEL_PATH = sys.argv[1]
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 def forward_process(x_0, t, mask):
     """Apply masking: x_t = mask * x_0"""
@@ -74,13 +75,27 @@ def sanity_check_denosing(num_samples=8):
     plt.savefig('sanity_check_denosing.png', dpi=150, bbox_inches='tight')
     print(f"Saved sanity check to sanity_check_denosing.png")
 
-def sanity_check_sampling(num_samples=8):
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+def sample_images(model, num_samples=8, num_steps=10):
+    before = torch.zeros(num_samples, 1, 28, 28)
+    mask = torch.ones(num_samples, 1, 28, 28)
+    for i in range(num_steps-1, -1, -1):
+        t = torch.full((num_samples,), i, device=device, dtype=torch.long)
+        with torch.no_grad():
+            pred = model(before, t, mask)
+        
+        #select 1/num_steps pixels, that were masked, and fill them, updating the mask
+        unmask_indices = torch.randint(0, num_samples, (num_samples//num_steps,))
+        before[unmask_indices] = pred[unmask_indices]
+        mask[unmask_indices] = 0
+    return before
+
+def sanity_check_sampling(num_samples=8, num_steps=10):
+    
     model = UNet.load_checkpoint(MODEL_PATH).to(device)
     model.eval()
-    with torch.no_grad():
-        samples = model.sample(num_samples)
-    # Prepare for visualization (denormalize to [0, 1])
+    
+    samples = sample_images(model, num_samples=num_samples, num_steps=num_steps)
+    samples = torch.clamp(samples, -1, 1)
     samples_viz = (samples + 1) / 2.0
     grid = make_grid(samples_viz, nrow=num_samples, padding=2)
     plt.figure(figsize=(15, 5))
