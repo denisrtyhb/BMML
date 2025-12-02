@@ -43,10 +43,11 @@ def sanity_check(num_samples=8):
     prob_zero = t.float().view(-1, 1, 1, 1) / 1000.0
     random_tensor = torch.rand(num_samples, 1, 28, 28, device=device)
     mask = (random_tensor > prob_zero).float()
+
+    print("Mask density: ", mask.mean(axis=[1,2,3]))
     
     # Forward process: create masked images
     masked = forward_process(images, t, mask)
-    
     # Denoise
     denoised = denoise(model, masked, t, mask, device)
     
