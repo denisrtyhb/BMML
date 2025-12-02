@@ -71,7 +71,7 @@ def sanity_check_denosing(num_samples=8):
     plt.axis('off')
     plt.title('Original | Masked | Denoised')
     plt.tight_layout()
-    plt.savefig('sanity_check.png', dpi=150, bbox_inches='tight')
+    plt.savefig('sanity_check_denosing.png', dpi=150, bbox_inches='tight')
     print(f"Saved sanity check to sanity_check_denosing.png")
 
 def sanity_check_sampling(num_samples=8):
