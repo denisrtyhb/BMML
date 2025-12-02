@@ -1,0 +1,40 @@
+# Checkpoints and model files
+checkpoints/
+*.pth
+*.pt
+*.ckpt
+
+# Data folder
+data/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Samples folder
+samples/
+
+# Jupyter notebook examples
+ipynb_examples/
+
+# Outputs
+outputs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+venv/
+env/
+ENV/
