@@ -20,11 +20,11 @@ def denoise(model, x_t, t, mask, device):
         pred_x_0 = model(x_t, t, mask)
     return pred_x_0
 
-def sanity_check(model_path='checkpoints/simpliest_unet.pth', num_samples=8):
+def sanity_check(num_samples=8):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
     # Load model
-    model = UNet.load_checkpoint(model_path)
+    model = UNet.load_checkpoint(MODEL_PATH).to(device)
     # Load dataset
     transform = transforms.Compose([
         transforms.Resize((28, 28)),
