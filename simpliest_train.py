@@ -66,7 +66,8 @@ def train():
     transform = transforms.Compose([
         transforms.Resize((28, 28)),
         transforms.ToTensor(),
-        transforms.Normalize([0.5], [0.5])  # Normalize to [-1, 1]
+        transforms.Normalize([0.5], [0.5]),  # Normalize to [-1, 1]
+        transforms.v2.GaussianNoise(mean=0.0, std=0.1),
     ])
     dataset = datasets.MNIST('./data', train=True, download=True, transform=transform)
     dataloader = DataLoader(dataset, batch_size=256, shuffle=True)

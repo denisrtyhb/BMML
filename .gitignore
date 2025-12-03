@@ -38,3 +38,6 @@ Thumbs.db
 venv/
 env/
 ENV/
+
+
+preds/

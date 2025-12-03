@@ -24,14 +24,28 @@ def denoise(model, x_t, t, mask, device):
         pred_x_0 = model(x_t, t, mask)
     return pred_x_0
 
+
+import numpy as np
+from PIL import Image
+def save_as_image(tensor, path):
+    tensor = tensor.clamp(-1, 1)
+    tensor = (tensor + 1) / 2.0
+    tensor = tensor.cpu().permute(1, 2, 0).numpy()
+    tensor = tensor.squeeze()
+    tensor = tensor * 255.0
+    tensor = tensor.astype(np.uint8)
+    image = Image.fromarray(tensor)
+    image.save(path)
+
 def denoise_one_step_based_on_mask(model, before, mask, t, num_to_unmask=None):
     assert before.shape == (1, 28, 28), f"Before shape: {before.shape}"
     assert mask.shape == (1, 28, 28), f"Mask shape: {mask.shape}"
     
     pred = denoise(model, before.unsqueeze(0), t.unsqueeze(0), mask.unsqueeze(0), device)[0]
 
+    save_as_image(pred, f"preds/{(mask == 1).sum().item()}.png")
+
     new_pred = pred[mask == 1]
-    print(f"Pred stats: {new_pred.min()=} {new_pred.max()=} {new_pred.mean()=} {new_pred.std()=}")
     after = before.clone()
     
     if num_to_unmask is not None:
@@ -56,6 +70,7 @@ def denoise_one_step_based_on_mask(model, before, mask, t, num_to_unmask=None):
 
 def denoise_full_trajectory_based_on_mask(model, before, mask, t, num_steps):
     # return denoise_one_step_based_on_mask(model, before, mask, t, num_to_unmask=int((1-mask).sum().item()))[0].unsqueeze(0)
+    print(f"{before.shape=} {mask.shape=} {t.shape=}")
     trajectory = []
     print("New trajectory")
     for i in range(num_steps-1, -1, -1):
@@ -67,7 +82,7 @@ def denoise_full_trajectory_based_on_mask(model, before, mask, t, num_steps):
         trajectory.append(before.clone())
     return torch.stack(trajectory, dim=0)
 
-def sanity_check_denosing(num_samples=1):
+def sanity_check_denosing(num_samples=16):
     # Load model
     model = UNet.load_checkpoint(MODEL_PATH).to(device)
     # Load dataset
@@ -104,11 +119,11 @@ def sanity_check_denosing(num_samples=1):
     if use_denoise_full_trajectory:
         print(mask[0].shape)
         denoised = [
-            denoise_full_trajectory_based_on_mask(model, masked[i], mask[i], t[i], num_steps=1)
+            denoise_full_trajectory_based_on_mask(model, masked[i], mask[i], t[i], num_steps=2)
                 for i in range(num_samples)]
         print(type(denoised))
         print([type(i) for i in denoised])
-        denoised = torch.stack(denoised, dim=0)[:, 0, :, :, :]
+        denoised = torch.stack(denoised, dim=0)[:, -1, :, :, :]
     elif interface_check:
         print(mask[0].shape)
         denoised = [
@@ -122,8 +137,8 @@ def sanity_check_denosing(num_samples=1):
         denoised = denoise(model, masked, t, mask, device)
     
     # Prepare for visualization (denormalize to [0, 1])
-    images_viz = (images + 1) / 2.0
-    masked_viz = (masked + 1) / 2.0
+    images_viz = torch.clamp((images + 1) / 2.0, 0, 1)
+    masked_viz = torch.clamp((masked + 1) / 2.0, 0, 1)
     denoised_viz = torch.clamp((denoised + 1) / 2.0, 0, 1)
     
     # Create grid: original | masked | denoised
@@ -150,14 +165,15 @@ def sample_images(model, num_samples=1, num_steps=10):
     for sample in range(num_samples):
         
         before = torch.zeros(1, 28, 28, device=device)
-        mask = torch.ones(1, 28, 28, device=device)
+        mask = torch.zeros(1, 28, 28, device=device)
+        t = torch.tensor(999, device=device, dtype=torch.long)
 
         trajectory.append(denoise_full_trajectory_based_on_mask(
-            model, before, mask, t, num_steps))
+            model, before, mask, t, num_steps=num_steps))
     trajectory = torch.stack(trajectory, dim=0)
     return trajectory.permute(1, 0, 2, 3, 4)
 
-def sanity_check_sampling(num_samples=10, num_steps=10):
+def sanity_check_sampling(num_samples=3, num_steps=10):
     
     model = UNet.load_checkpoint(MODEL_PATH).to(device)
     model.eval()
@@ -170,9 +186,9 @@ def sanity_check_sampling(num_samples=10, num_steps=10):
     # Rearrange: [num_steps+1, num_samples, ...] -> [num_samples, num_steps+1, ...]
     samples_viz = samples_viz.permute(1, 0, 2, 3, 4)  # [num_samples, num_steps+1, 1, 28, 28]
     # Flatten trajectories: for each sample, concatenate each step along width
-    samples_viz = samples_viz.reshape(num_samples * (num_steps + 1), 1, 28, 28)
+    samples_viz = samples_viz.reshape(num_samples * (num_steps), 1, 28, 28)
     # Make grid: num_samples rows, num_steps+1 columns
-    grid = make_grid(samples_viz, nrow=num_steps + 1, padding=2)
+    grid = make_grid(samples_viz, nrow=num_steps, padding=2)
     plt.figure(figsize=(2 * (num_steps + 1), 2 * num_samples))
     plt.imshow(grid.permute(1, 2, 0).cpu().numpy(), cmap='gray')
     plt.axis('off')
@@ -183,4 +199,4 @@ def sanity_check_sampling(num_samples=10, num_steps=10):
 
 if __name__ == '__main__':
     sanity_check_denosing()
-    # sanity_check_sampling()
+    sanity_check_sampling()
