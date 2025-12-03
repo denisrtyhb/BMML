@@ -41,6 +41,12 @@ def train_step(model, x_0, device):
     # Sample random timestep (0 to 999)
     t = torch.randint(0, 1000, (batch_size,), device=device)
 
+
+    # alpha(i) = 1 - (i + 1) / (T + 1)
+    # alpha'(i) = (i + 1) / (T + 1)^2
+    # weight(i) = alpha'(i) / (1 - alpha(i)) = (i + 1) / (T + 1) / (T - i)
+    w = (t + 1) / 1000.0 / (1000 - t)
+
     # Generate a mask where each entry has probability (t/1000) of being 0, vectorized
     prob_zero = t.float().view(-1, 1, 1, 1) / 1000.0
     random_tensor = torch.rand(batch_size, 1, x_0.shape[2], x_0.shape[3], device=device)
@@ -49,9 +55,11 @@ def train_step(model, x_0, device):
     x_t = forward_process(x_0, t, mask)  # [B, C, H, W]
     
     pred_x_0 = model(x_t, t, mask)  # [B, C, H, W]
+
     
-    loss = F.mse_loss(pred_x_0, x_0)
+    losses_in_batch = ((pred_x_0 - x_0) ** 2).mean(axis=[1,2,3])
     
+    loss = (losses_in_batch * w).mean()
     return loss
 
 # Main training
