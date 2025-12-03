@@ -45,7 +45,8 @@ def train_step(model, x_0, device):
     # alpha(i) = 1 - (i + 1) / (T + 1)
     # alpha'(i) = (i + 1) / (T + 1)^2
     # weight(i) = alpha'(i) / (1 - alpha(i)) = (i + 1) / (T + 1) / (T - i)
-    w = (t + 1) / 1000.0 / (1000 - t)
+    # 1/(T+1) can be omited because it is a constant for all timesteps
+    w = (t + 1) / (1000 - t)
 
     # Generate a mask where each entry has probability (t/1000) of being 0, vectorized
     prob_zero = t.float().view(-1, 1, 1, 1) / 1000.0
