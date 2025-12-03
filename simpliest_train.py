@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 from tqdm import tqdm
+from torchvision.transforms.v2 import GaussianNoise
 
 # Simple UNet for masked diffusion
 from model import UNet
@@ -67,7 +68,7 @@ def train():
         transforms.Resize((28, 28)),
         transforms.ToTensor(),
         transforms.Normalize([0.5], [0.5]),  # Normalize to [-1, 1]
-        transforms.v2.GaussianNoise(mean=0.0, std=0.1),
+        GaussianNoise(mean=0.0, std=0.1),
     ])
     dataset = datasets.MNIST('./data', train=True, download=True, transform=transform)
     dataloader = DataLoader(dataset, batch_size=256, shuffle=True)
