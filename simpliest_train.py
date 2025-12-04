@@ -83,7 +83,7 @@ def train():
     dataloader = DataLoader(dataset, batch_size=256, shuffle=True)
     
     # Training loop
-    num_epochs = 1
+    num_epochs = 20
     model.train()
     
     for epoch in range(num_epochs):
