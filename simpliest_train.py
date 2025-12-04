@@ -8,7 +8,7 @@ from model import UNet
 from dataset import DiscreteMNIST
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-device = 'cpu'
+# device = 'cpu'
 
 
 # Forward process: convert image tokens to masked tokens
