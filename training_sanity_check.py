@@ -114,27 +114,26 @@ def sanity_check_denosing(num_samples=16):
     # Forward process: create masked images
     masked = forward_process(images, t, mask)
     # Denoise
-    use_denoise_full_trajectory = True
-    interface_check = True
-    if use_denoise_full_trajectory:
-        print(mask[0].shape)
-        denoised = [
-            denoise_full_trajectory_based_on_mask(model, masked[i], mask[i], t[i], num_steps=2)
-                for i in range(num_samples)]
-        print(type(denoised))
-        print([type(i) for i in denoised])
-        denoised = torch.stack(denoised, dim=0)[:, -1, :, :, :]
-    elif interface_check:
-        print(mask[0].shape)
-        denoised = [
-            denoise_one_step_based_on_mask(model, masked[i], mask[i], t[i], num_to_unmask=int((1-mask[i]).sum().item()))[0]
-                for i in range(num_samples)]
-        print(type(denoised))
-        print([type(i) for i in denoised])
-        denoised = torch.stack(denoised, dim=0)
-
-    else:
-        denoised = denoise(model, masked, t, mask, device)
+    # use_denoise_full_trajectory = True
+    # interface_check = True
+    # if use_denoise_full_trajectory:
+    #     print(mask[0].shape)
+    #     denoised = [
+    #         denoise_full_trajectory_based_on_mask(model, masked[i], mask[i], t[i], num_steps=2)
+    #             for i in range(num_samples)]
+    #     print(type(denoised))
+    #     print([type(i) for i in denoised])
+    #     denoised = torch.stack(denoised, dim=0)[:, -1, :, :, :]
+    # elif interface_check:
+    #     print(mask[0].shape)
+    #     denoised = [
+    #         denoise_one_step_based_on_mask(model, masked[i], mask[i], t[i], num_to_unmask=int((1-mask[i]).sum().item()))[0]
+    #             for i in range(num_samples)]
+    #     print(type(denoised))
+    #     print([type(i) for i in denoised])
+    #     denoised = torch.stack(denoised, dim=0)
+    
+    denoised = denoise(model, masked, t, mask, device)
     
     # Prepare for visualization (denormalize to [0, 1])
     images_viz = torch.clamp((images + 1) / 2.0, 0, 1)
