@@ -162,8 +162,19 @@ from torchvision import datasets, transforms
 from tqdm import tqdm
 from unet import UNet
 
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--n_epoch", type=int, default=1, help="Number of training epochs")
+parser.add_argument("--device", type=str, default="cpu", help="Device to use: cpu or cuda")
+args = parser.parse_args()
+
+n_epoch = getattr(args, "n_epoch", 20)
+device = getattr(args, "device", 'cuda' if torch.cuda.is_available() else 'cpu')
+
+
 def train():
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device=device
     print(f"Device: {device}")
     
     # 1. Setup Data - STRICT BINARY (0.0 or 1.0)
@@ -181,7 +192,7 @@ def train():
     model = UNet().to(device)
     optim = torch.optim.AdamW(model.parameters(), lr=1e-4)
     
-    epochs = 20 # 20 is enough for binary
+    epochs = n_epoch # 20 is enough for binary
     
     for epoch in range(epochs):
         model.train()
