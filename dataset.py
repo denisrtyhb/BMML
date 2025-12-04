@@ -153,3 +153,26 @@ def get_dataloader(data_dir='./data', batch_size=64, image_size=32,
     
     return dataloader
 
+    # INSERT_YOUR_CODE
+class DiscreteMNIST(torch.utils.data.Dataset):
+    """
+    Binarized (discrete) version of MNIST where pixels are either 0 or 1.
+    Each sample is a tensor of shape [1, 28, 28], normalized to values 0 or 1 (not -1 to 1).
+    If `normalize_to_minus1_1` is True, will map {0,1} to {-1,1}.
+    """
+    def __init__(self, root="./data", train=True, download=True, normalize_to_minus1_1=False):
+        self.dataset = datasets.MNIST(root, train=train, download=download)
+        self.normalize_to_minus1_1 = normalize_to_minus1_1
+        
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, idx):
+        img, label = self.dataset[idx]
+        # Convert PIL image to tensor (float in [0,1])
+        img = transforms.ToTensor()(img)
+        # Binarize: threshold at 0.5
+        img = (img > 0.5).float()
+        if self.normalize_to_minus1_1:
+            img = img * 2 - 1
+        return img

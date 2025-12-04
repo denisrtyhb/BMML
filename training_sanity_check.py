@@ -1,195 +1,197 @@
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from torchvision import datasets, transforms
 from torchvision.utils import make_grid
 import matplotlib.pyplot as plt
 from model import UNet
+from dataset import DiscreteMNIST
 import sys
+import numpy as np
+from PIL import Image
 
 MODEL_PATH = sys.argv[1]
-# device = 'cuda' if torch.cuda.is_available() else 'cpu'
 device = 'cpu'
 seed = 42
 torch.manual_seed(seed)
 
-def forward_process(x_0, t, mask):
-    """Apply masking: x_t = mask * x_0"""
-    return mask * x_0
+def forward_process(tokens_0, mask):
+    """
+    Convert original tokens to masked tokens.
+    tokens_0: [B, H, W] with values {0, 1}
+    mask: [B, H, W] with values {0, 1}, 1=preserve, 0=mask
+    Returns: tokens_t [B, H, W] with values {0, 1, 2} where 2=MSK
+    """
+    tokens_t = tokens_0.clone()
+    print(tokens_t.shape, mask.shape)
+    tokens_t[mask.float() == 1] = 2  # Set masked pixels to MSK token (2)
+    return tokens_t
 
-def denoise(model, x_t, t, mask, device):
-    """Denoise by predicting original image"""
+def denoise(model, tokens_t, t):
+    """
+    Denoise by predicting logits for masked tokens.
+    tokens_t: [B, H, W] with values {0, 1, 2}
+    t: [B] timestep
+    Returns: logits [B, 2, H, W] for classes {0, 1}
+    """
     model.eval()
     with torch.no_grad():
-        pred_x_0 = model(x_t, t, mask)
-    return pred_x_0
+        logits = model(tokens_t, t)  # [B, 2, H, W]
 
+    return logits
 
-import numpy as np
-from PIL import Image
-def save_as_image(tensor, path):
-    tensor = tensor.clamp(-1, 1)
-    tensor = (tensor + 1) / 2.0
-    tensor = tensor.cpu().permute(1, 2, 0).numpy()
-    tensor = tensor.squeeze()
-    tensor = tensor * 255.0
-    tensor = tensor.astype(np.uint8)
-    image = Image.fromarray(tensor)
+def logits_to_tokens(logits):
+    """Convert logits to predicted tokens using argmax"""
+    return logits.argmax(dim=1)  # [B, H, W] with values {0, 1}
+
+def save_as_image(tokens, path):
+    """Save tokens as image (0=black, 1=white)"""
+    tokens = tokens.cpu().numpy()
+    tokens = tokens.squeeze()
+    tokens = tokens * 255.0
+    tokens = tokens.astype(np.uint8)
+    image = Image.fromarray(tokens, mode='L')
     image.save(path)
 
-def denoise_one_step_based_on_mask(model, before, mask, t, num_to_unmask=None):
-    assert before.shape == (1, 28, 28), f"Before shape: {before.shape}"
-    assert mask.shape == (1, 28, 28), f"Mask shape: {mask.shape}"
+def denoise_one_step_based_on_mask(model, tokens_before, t, num_to_unmask=None):
+    """
+    Denoise one step, optionally unmasking some pixels.
+    tokens_before: [H, W] with values {0, 1, 2}
+    mask: [H, W] with values {0, 1}, 1=preserve, 0=mask
+    Returns: tokens_after [H, W], updated_mask [H, W]
+    """
+    assert tokens_before.shape == (28, 28), f"Before shape: {tokens_before.shape}"
     
-    pred = denoise(model, before.unsqueeze(0), t.unsqueeze(0), mask.unsqueeze(0), device)[0]
-
-    save_as_image(pred, f"preds/{(mask == 1).sum().item()}.png")
-
-    new_pred = pred[mask == 1]
-    after = before.clone()
+    # Get predictions
+    logits = denoise(model, tokens_before.unsqueeze(0), t.unsqueeze(0))[0]  # [2, H, W]
+    pred_tokens = logits_to_tokens(logits.unsqueeze(0))[0]  # [H, W]
+    
+    tokens_after = tokens_before.clone()
     
     if num_to_unmask is not None:
-        masked_candidates = (1-mask).nonzero(as_tuple=False)
-        print(f"Unmask {num_to_unmask} pixels out of {len(masked_candidates)}")
-        unmask_indices = masked_candidates[torch.randperm(len(masked_candidates))[:num_to_unmask]]
-
-        x = unmask_indices[:, 0]
-        y = unmask_indices[:, 1]
-        z = unmask_indices[:, 2]
-
-        after[x, y, z] = pred[x, y, z].clamp(-1, 1)
-        mask[x, y, z] = 1
+        # Unmask some pixels
+        masked_candidates = (tokens_before == 2).nonzero(as_tuple=False)  # [N, 2]
+        if len(masked_candidates) > 0:
+            num_to_unmask = min(num_to_unmask, len(masked_candidates))
+            unmask_indices = masked_candidates[torch.randperm(len(masked_candidates))[:num_to_unmask]]
+            
+            for idx in unmask_indices:
+                h, w = idx[0].item(), idx[1].item()
+                tokens_after[h, w] = pred_tokens[h, w]
     else:
-        print(f"{(mask > 0).sum()=}")
-        after[mask == 1] = pred[mask == 1].clamp(-1, 1)
-        mask[mask == 1] = 1
+        # Update all masked positions
+        tokens_after[tokens_before == 2] = pred_tokens[tokens_before == 2]
+    
+    return tokens_after
 
-        # return pred * mask + before * (1 - mask), mask
-
-    return after, mask
-
-def denoise_full_trajectory_based_on_mask(model, before, mask, t, num_steps):
-    # return denoise_one_step_based_on_mask(model, before, mask, t, num_to_unmask=int((1-mask).sum().item()))[0].unsqueeze(0)
-    print(f"{before.shape=} {mask.shape=} {t.shape=}")
+def denoise_full_trajectory_based_on_mask(model, tokens_start, t, num_steps):
+    """
+    Denoise over multiple steps, gradually unmasking pixels.
+    Returns: trajectory [num_steps, H, W] of tokens at each step
+    """
+    tokens = tokens_start.clone()
     trajectory = []
-    print("New trajectory")
+    
     for i in range(num_steps-1, -1, -1):
-        num_to_unmask = int((1-mask).sum().item() // (i + 1))
-        print(f"{num_to_unmask=}")
-        before, mask = denoise_one_step_based_on_mask(
-            model, before, mask,
-            t * (i + 1) / num_steps, num_to_unmask=num_to_unmask)
-        trajectory.append(before.clone())
-    return torch.stack(trajectory, dim=0)
+        num_masked = (tokens == 2).sum().item()
+        if num_masked > 0:
+            num_to_unmask = num_masked // (i + 1)
+            tokens = denoise_one_step_based_on_mask(
+                model, tokens, t, num_to_unmask=num_to_unmask)
+        trajectory.append(tokens.clone())
+    
+    return torch.stack(trajectory, dim=0)  # [num_steps, H, W]
 
 def sanity_check_denosing(num_samples=16):
+    """Test denoising on real images"""
     # Load model
     model = UNet.load_checkpoint(MODEL_PATH).to(device)
-    # Load dataset
-    transform = transforms.Compose([
-        transforms.Resize((28, 28)),
-        transforms.ToTensor(),
-        transforms.Normalize([0.5], [0.5])
-    ])
-    dataset = datasets.MNIST('./data', train=False, download=True, transform=transform)
+    model.eval()
+    
+    # Load DiscreteMNIST dataset
+    dataset = DiscreteMNIST(root='./data', train=False, download=True, normalize_to_minus1_1=False)
     dataloader = DataLoader(dataset, batch_size=num_samples, shuffle=True)
     
     # Get samples
-    images, _ = next(iter(dataloader))
-    images = images.to(device)  # [B, 1, 28, 28]
-    # Adding just a bit of noise
-    images = images + torch.randn_like(images) * 0.1
-    print("LUL")
-
-    print("Stats for images: ", images.min(), images.max(), images.mean(), images.std())
+    images = next(iter(dataloader))  # [B, 1, 28, 28] with values {0, 1}
+    tokens_0 = images.squeeze(1).to(device)  # [B, 28, 28] with values {0, 1}
     
     # Apply masking (like in training)
-    t = torch.randint(1, 1000, (num_samples,), device=device)  # Random timestep for each sample
-    prob_zero = t.float().view(-1, 1, 1, 1) / 1000.0
-    random_tensor = torch.rand(num_samples, 1, 28, 28, device=device)
-    mask = (random_tensor > prob_zero).float()
-
-    print("Mask density: ", mask.mean(axis=[1,2,3]))
+    t = torch.randint(1, 1000, (num_samples,), device=device)
+    prob_zero = t.float().view(-1, 1, 1) / 1000.0
+    random_tensor = torch.rand(num_samples, 28, 28, device=device)
+    mask = (random_tensor > prob_zero).float()  # [B, H, W], 1=preserve, 0=mask
     
-    # Forward process: create masked images
-    masked = forward_process(images, t, mask)
+    print(f"Mask density: {mask.mean(axis=[1,2])}")
+    
+    # Forward process: create masked tokens
+    tokens_t = forward_process(tokens_0, mask)  # [B, H, W] with values {0, 1, 2}
+    
     # Denoise
-    # use_denoise_full_trajectory = True
-    # interface_check = True
-    # if use_denoise_full_trajectory:
-    #     print(mask[0].shape)
-    #     denoised = [
-    #         denoise_full_trajectory_based_on_mask(model, masked[i], mask[i], t[i], num_steps=2)
-    #             for i in range(num_samples)]
-    #     print(type(denoised))
-    #     print([type(i) for i in denoised])
-    #     denoised = torch.stack(denoised, dim=0)[:, -1, :, :, :]
-    # elif interface_check:
-    #     print(mask[0].shape)
-    #     denoised = [
-    #         denoise_one_step_based_on_mask(model, masked[i], mask[i], t[i], num_to_unmask=int((1-mask[i]).sum().item()))[0]
-    #             for i in range(num_samples)]
-    #     print(type(denoised))
-    #     print([type(i) for i in denoised])
-    #     denoised = torch.stack(denoised, dim=0)
+    logits = denoise(model, tokens_t, t)  # [B, 2, H, W]
+    tokens_pred = logits_to_tokens(logits)  # [B, H, W] with values {0, 1}
     
-    denoised = denoise(model, masked, t, mask, device)
-    
-    # Prepare for visualization (denormalize to [0, 1])
-    images_viz = torch.clamp((images + 1) / 2.0, 0, 1)
-    masked_viz = torch.clamp((masked + 1) / 2.0, 0, 1)
-    denoised_viz = torch.clamp((denoised + 1) / 2.0, 0, 1)
+    # Prepare for visualization: convert tokens to images [B, 1, H, W]
+    images_viz = tokens_0.unsqueeze(1).float()  # [B, 1, H, W]
+    masked_viz = tokens_t.unsqueeze(1).float()  # [B, 1, H, W] (2 will show as white)
+    masked_viz[masked_viz == 2] = 0.5  # Show MSK as gray
+    denoised_viz = tokens_pred.unsqueeze(1).float()  # [B, 1, H, W]
     
     # Create grid: original | masked | denoised
     grid = torch.cat([images_viz, masked_viz, denoised_viz], dim=0)
     grid = make_grid(grid, nrow=num_samples, padding=2)
     
     # Plot and save
-    # Add left-side subtitles for each row: Original, Masked, Denoised
-    for i, label in enumerate(["Original", "Masked", "Denoised"]):
-        # The y-coordinate is centered for each row block
-        y = (i + 0.5) / 3
-        plt.figtext(0.04, 1 - y, label, va="center", ha="right", fontsize=16, weight='bold', rotation=90)
     plt.figure(figsize=(15, 5))
-    plt.imshow(grid.permute(1, 2, 0).cpu().numpy(), cmap='gray')
+    plt.imshow(grid.permute(1, 2, 0).cpu().numpy().squeeze(), cmap='gray')
     plt.axis('off')
-    plt.title('Original | Masked | Denoised')
+    plt.title('Original | Masked (gray=MSK) | Denoised')
     plt.tight_layout()
     plt.savefig('sanity_check_denosing.png', dpi=150, bbox_inches='tight')
     print(f"Saved sanity check to sanity_check_denosing.png")
 
 def sample_images(model, num_samples=1, num_steps=10):
-    # Instead of just returning the final sample, collect the images at each step and return all of them as a tensor of shape [num_steps+1, num_samples, 1, 28, 28]
-    trajectory = []
+    """
+    Generate samples from scratch.
+    Returns: trajectory [num_steps, num_samples, 1, 28, 28]
+    """
+    trajectories = []
     for sample in range(num_samples):
-        
-        before = torch.zeros(1, 28, 28, device=device)
-        mask = torch.zeros(1, 28, 28, device=device)
+        # Start with all tokens masked (all MSK)
+        tokens_start = torch.full((28, 28), 2, device=device, dtype=torch.long)  # All MSK
         t = torch.tensor(999, device=device, dtype=torch.long)
-
-        trajectory.append(denoise_full_trajectory_based_on_mask(
-            model, before, mask, t, num_steps=num_steps))
-    trajectory = torch.stack(trajectory, dim=0)
-    return trajectory.permute(1, 0, 2, 3, 4)
+        
+        trajectory = denoise_full_trajectory_based_on_mask(
+            model, tokens_start, t, num_steps=num_steps)
+        # trajectory: [num_steps, H, W]
+        trajectories.append(trajectory)
+    
+    # Stack: [num_samples, num_steps, H, W] -> [num_steps, num_samples, 1, H, W]
+    trajectories = torch.stack(trajectories, dim=0)  # [num_samples, num_steps, H, W]
+    trajectories = trajectories.permute(1, 0, 2, 3)  # [num_steps, num_samples, H, W]
+    trajectories = trajectories.unsqueeze(2)  # [num_steps, num_samples, 1, H, W]
+    return trajectories
 
 def sanity_check_sampling(num_samples=3, num_steps=10):
-    
+    """Test sampling from scratch"""
     model = UNet.load_checkpoint(MODEL_PATH).to(device)
     model.eval()
     
-    samples = sample_images(model, num_samples=num_samples, num_steps=num_steps)  # [num_steps+1, num_samples, 1, 28, 28]
-    samples = torch.clamp(samples, -1, 1)
-    samples_viz = (samples + 1) / 2.0  # [num_steps+1, num_samples, 1, 28, 28]
-
-    # Make a grid such that each row is a trajectory over time for a single sample
-    # Rearrange: [num_steps+1, num_samples, ...] -> [num_samples, num_steps+1, ...]
-    samples_viz = samples_viz.permute(1, 0, 2, 3, 4)  # [num_samples, num_steps+1, 1, 28, 28]
-    # Flatten trajectories: for each sample, concatenate each step along width
-    samples_viz = samples_viz.reshape(num_samples * (num_steps), 1, 28, 28)
-    # Make grid: num_samples rows, num_steps+1 columns
+    samples = sample_images(model, num_samples=num_samples, num_steps=num_steps)
+    # samples: [num_steps, num_samples, 1, 28, 28] with values {0, 1, 2}
+    
+    # Convert to float for visualization (MSK=2 -> gray=0.5)
+    samples_viz = samples.float()
+    samples_viz[samples_viz == 2] = 0.5  # Show MSK as gray
+    
+    # Rearrange: [num_steps, num_samples, 1, H, W] -> [num_samples, num_steps, 1, H, W]
+    samples_viz = samples_viz.permute(1, 0, 2, 3, 4)  # [num_samples, num_steps, 1, H, W]
+    # Flatten: [num_samples * num_steps, 1, H, W]
+    samples_viz = samples_viz.reshape(num_samples * num_steps, 1, 28, 28)
+    
+    # Make grid: num_samples rows, num_steps columns
     grid = make_grid(samples_viz, nrow=num_steps, padding=2)
-    plt.figure(figsize=(2 * (num_steps + 1), 2 * num_samples))
-    plt.imshow(grid.permute(1, 2, 0).cpu().numpy(), cmap='gray')
+    plt.figure(figsize=(2 * num_steps, 2 * num_samples))
+    plt.imshow(grid.permute(1, 2, 0).cpu().numpy().squeeze(), cmap='gray')
     plt.axis('off')
     plt.title('Sampling Trajectories (Each Row: Time Steps for One Sample)')
     plt.tight_layout()

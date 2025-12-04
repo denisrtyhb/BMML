@@ -2,91 +2,88 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from torchvision import datasets, transforms
 from tqdm import tqdm
-from torchvision.transforms.v2 import GaussianNoise
 
-# Simple UNet for masked diffusion
 from model import UNet
+from dataset import DiscreteMNIST
 
-# Forward process for masked diffusion
-def forward_process(x_0, t, mask):
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+device = 'cpu'
+
+
+# Forward process: convert image tokens to masked tokens
+def forward_process(tokens_0, mask):
     """
     Masked diffusion forward process:
-    - t=0: x_t = x_0 (original image)
-    - t=1: x_t = mask * x_0 (masked pixels set to 0, preserved pixels keep original)
-    
-    Args:
-        x_0: original image [B, C, H, W]
-        t: timestep [B] (0 to 999, integer indices)
-        mask: binary mask [B, 1, H, W], 1=preserve pixel, 0=mask pixel (set to 0)
+    - tokens_0: original tokens [B, H, W] with values {0, 1}
+    - mask: binary mask [B, H, W], 1=preserve pixel, 0=mask pixel
     Returns:
-        x_t: masked image [B, C, H, W] where masked pixels are zeros
+        tokens_t: masked tokens [B, H, W] with values {0, 1, 2}
+                  where 2 = MSK (masked pixel)
     """
-    return mask * x_0
+    tokens_t = tokens_0.clone()
+    tokens_t[mask == 0] = 2  # Set masked pixels to MSK token (2)
+    return tokens_t
 
 # Training step
-def train_step(model, x_0, device):
+def train_step(model, tokens_0):
     """
-    Training step for masked diffusion.
+    Training step for masked diffusion with cross-entropy loss.
     
     Args:
-        model: UNet model that takes (masked_image, timestep, mask) and predicts original image
-        x_0: original image [B, C, H, W]
-        mask: binary mask [B, 1, H, W], 1=preserve, 0=mask
-        device: device to use
+        model: UNet model that takes tokens [B, H, W] and timestep [B], outputs logits [B, 2, H, W]
+        tokens_0: original tokens [B, H, W] with values {0, 1}
     """
-    batch_size = x_0.shape[0]
+    batch_size = tokens_0.shape[0]
     
     # Sample random timestep (0 to 999)
     t = torch.randint(0, 1000, (batch_size,), device=device)
 
-
-    # alpha(i) = 1 - (i + 1) / (T + 1)
-    # alpha'(i) = (i + 1) / (T + 1)^2
-    # weight(i) = alpha'(i) / (1 - alpha(i)) = (i + 1) / (T + 1) / (T - i)
-    # 1/(T+1) can be omited because it is a constant for all timesteps
-
-    # However, here we have reverse parametrization, so 
-    # weight(i) = (T - i) / (i + 1)
+    # Weight for timestep (optional, can remove if not needed)
     w = (1000 - t) / (t + 1)
 
-    # Generate a mask where each entry has probability (t/1000) of being 0, vectorized
-    prob_zero = t.float().view(-1, 1, 1, 1) / 1000.0
-    random_tensor = torch.rand(batch_size, 1, x_0.shape[2], x_0.shape[3], device=device)
-    mask = (random_tensor > prob_zero).float()
+    # Generate a mask where each entry has probability (t/1000) of being 0 (masked)
+    prob_zero = t.float().view(-1, 1, 1) / 1000.0
+    random_tensor = torch.rand(batch_size, tokens_0.shape[1], tokens_0.shape[2], device=device)
+    mask = (random_tensor > prob_zero).float()  # [B, H, W], 1=preserve, 0=mask
     
-    x_t = forward_process(x_0, t, mask)  # [B, C, H, W]
+    # Forward process: create masked tokens
+    tokens_t = forward_process(tokens_0, mask)  # [B, H, W] with values {0, 1, 2}
     
-    pred_x_0 = model(x_t, t, mask)  # [B, C, H, W]
+    # Model predicts logits for {0, 1} at each pixel
+    logits = model(tokens_t, t)  # [B, 2, H, W]
+    
+    # Cross-entropy loss only on masked tokens
+    # Reshape for cross-entropy: [B, 2, H, W] -> [B*H*W, 2] and [B, H, W] -> [B*H*W]
+    masked_positions = (mask == 0)  # [B, H, W], True where masked
+    if masked_positions.sum() == 0:
+        # No masked tokens, return zero loss
+        return torch.tensor(0.0, device=device, requires_grad=True)
+    
+    logits_flat = logits.permute(0, 2, 3, 1).reshape(-1, 2)  # [B*H*W, 2]
+    targets_flat = tokens_0.reshape(-1).long()  # [B*H*W]
+    mask_flat = masked_positions.reshape(-1)  # [B*H*W]
+    
+    # Compute loss only on masked positions
+    loss = F.cross_entropy(logits_flat[mask_flat], targets_flat[mask_flat], reduction='mean')
+    
+    loss = loss * w
 
-    
-    losses_in_batch = ((pred_x_0 - x_0) ** 2).mean(axis=[1,2,3])
-    
-    loss = (losses_in_batch * w).mean()
     return loss
 
 # Main training
 def train():
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    print(f"Using device: {device}")
     
-    # Model
-    model = UNet(in_channels=1, out_channels=1, base_channels=32).to(device)
+    # Model - token-based UNet
+    model = UNet(image_size=28, base_channels=32, token_embed_dim=64).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
     
-    # MNIST dataset
-    transform = transforms.Compose([
-        transforms.Resize((28, 28)),
-        transforms.ToTensor(),
-        transforms.Normalize([0.5], [0.5]),  # Normalize to [-1, 1]
-        GaussianNoise(mean=0.0, sigma=0.1),
-    ])
-    dataset = datasets.MNIST('./data', train=True, download=True, transform=transform)
+    # DiscreteMNIST dataset (returns [1, 28, 28] with values {0, 1})
+    dataset = DiscreteMNIST(root='./data', train=True, download=True, normalize_to_minus1_1=False)
     dataloader = DataLoader(dataset, batch_size=256, shuffle=True)
     
     # Training loop
-    num_epochs = 30
+    num_epochs = 1
     model.train()
     
     for epoch in range(num_epochs):
@@ -95,11 +92,14 @@ def train():
         running_loss = 0.0
         
         pbar = tqdm(dataloader, desc=f'Epoch {epoch+1}/{num_epochs}')
-        for batch_idx, (images, _) in enumerate(pbar):
-            images = images.to(device)  # [B, 1, 28, 28]
+        for batch_idx, images in enumerate(pbar):
+            # DiscreteMNIST returns [B, 1, 28, 28] with values {0, 1}
+            # Convert to [B, 28, 28] tokens by squeezing channel dimension
+            tokens = images.squeeze(1).to(device)  # [B, 28, 28] with values {0, 1}
+            
             # Training step
             optimizer.zero_grad()
-            loss = train_step(model, images, device)
+            loss = train_step(model, tokens)
             loss.backward()
             optimizer.step()
             

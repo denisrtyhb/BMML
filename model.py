@@ -53,23 +53,29 @@ class Block(nn.Module):
 
 class UNet(nn.Module):
     """
-    UNet architecture for masked diffusion.
+    UNet architecture for masked diffusion with token-based input.
     
-    Takes masked image x_t, timestep t, and mask as inputs.
-    Predicts the original image x_0.
+    Takes tokens [B, H, W] where each token is from {0, 1, MSK}:
+    - 0 = pixel value 0
+    - 1 = pixel value 1
+    - 2 = MSK (masked pixel)
+    
+    Predicts logits for {0, 1} at each pixel.
     
     Architecture:
-    - Input: masked image [B, C, H, W] + mask [B, 1, H, W] = [B, C+1, H, W]
-    - Output: predicted original image [B, C, H, W]
+    - Input: tokens [B, H, W] with values in {0, 1, 2}
+    - Output: logits [B, 2, H, W] for classes {0, 1}
     """
-    def __init__(self, in_channels=3, out_channels=3, image_size=32, 
-                 base_channels=64, time_embed_dim=128):
+    def __init__(self, image_size=32, base_channels=64, time_embed_dim=128, 
+                 token_embed_dim=64):
         super().__init__()
         self.image_size = image_size
         self.time_embed_dim = time_embed_dim
-        self.in_channels = in_channels
-        self.out_channels = out_channels
         self.base_channels = base_channels
+        self.token_embed_dim = token_embed_dim
+        
+        # Token embedding: 3 tokens {0, 1, MSK} -> embed_dim
+        self.token_embed = nn.Embedding(3, token_embed_dim)  # 0, 1, MSK
         
         # Time embedding
         self.time_mlp = nn.Sequential(
@@ -78,8 +84,8 @@ class UNet(nn.Module):
             nn.ReLU()
         )
         
-        # Initial projection
-        self.input_proj = nn.Conv2d(in_channels + 1, base_channels, 3, padding=1)  # +1 for mask
+        # Initial projection: token embeddings -> base_channels
+        self.input_proj = nn.Conv2d(token_embed_dim, base_channels, 3, padding=1)
         
         # Downsampling
         self.down1 = Block(base_channels, base_channels, time_embed_dim)
@@ -96,32 +102,29 @@ class UNet(nn.Module):
         self.up2 = Block(base_channels * 2, base_channels, time_embed_dim, up=True)
         self.up3 = Block(base_channels, base_channels, time_embed_dim, up=True)
         
-        # Output
-        self.output = nn.Conv2d(base_channels, out_channels, 1)
+        # Output: logits for {0, 1}
+        self.output = nn.Conv2d(base_channels, 2, 1)
         
-    def forward(self, x, timestep, mask=None):
+    def forward(self, tokens, timestep):
         """
         Forward pass.
         
         Args:
-            x: Masked image at timestep t [B, C, H, W]
+            tokens: Token tensor [B, H, W] with values in {0, 1, 2}
+                   0 = pixel value 0
+                   1 = pixel value 1
+                   2 = MSK (masked pixel)
             timestep: Timestep indices [B] (integer indices 0 to num_timesteps-1)
-            mask: Binary mask [B, 1, H, W] (1 = preserve pixel, 0 = mask pixel)
         
         Returns:
-            Predicted original image x_0 [B, C, H, W]
+            Logits for {0, 1} at each pixel [B, 2, H, W]
         """
         # Time embedding
         t = self.time_mlp(timestep)
         
-        # Concatenate mask if provided
-        if mask is not None:
-            x = torch.cat([x, mask], dim=1)
-        else:
-            # If no mask provided, create a zero mask (all regions to generate)
-            zero_mask = torch.zeros(x.shape[0], 1, x.shape[2], x.shape[3], 
-                                   device=x.device, dtype=x.dtype)
-            x = torch.cat([x, zero_mask], dim=1)
+        # Embed tokens: [B, H, W] -> [B, token_embed_dim, H, W]
+        x = self.token_embed(tokens.long())  # [B, H, W, token_embed_dim]
+        x = x.permute(0, 3, 1, 2)  # [B, token_embed_dim, H, W]
         
         # Initial projection
         x = self.input_proj(x)
@@ -150,10 +153,10 @@ class UNet(nn.Module):
             up2 = F.interpolate(up2, size=down1.shape[2:], mode='bilinear', align_corners=False)
         up3 = self.up3(torch.cat((up2, down1), dim=1), t)
         
-        # Output
-        output = self.output(up3)
+        # Output: logits for {0, 1}
+        logits = self.output(up3)  # [B, 2, H, W]
         
-        return output
+        return logits
     
     def save_checkpoint(self, path):
         # Create the directory for the checkpoint if it doesn't exist
@@ -162,64 +165,55 @@ class UNet(nn.Module):
             os.makedirs(dirpath)
         state_dict = self.state_dict()
         init_args = {
-            'in_channels': self.in_channels,
-            'out_channels': self.out_channels,
             'image_size': self.image_size,
             'base_channels': self.base_channels,
-            'time_embed_dim': self.time_embed_dim
+            'time_embed_dim': self.time_embed_dim,
+            'token_embed_dim': self.token_embed_dim
         }
         torch.save({
             'state_dict': state_dict,
             'init_args': init_args
         }, path)
     
+    @staticmethod
     def load_checkpoint(path):
-        checkpoint = torch.load(path)
-        model = UNet(
-            in_channels=checkpoint['init_args']['in_channels'],
-            out_channels=checkpoint['init_args']['out_channels'],
-            image_size=checkpoint['init_args']['image_size'],
-            base_channels=checkpoint['init_args']['base_channels'],
-            time_embed_dim=checkpoint['init_args']['time_embed_dim']
-        )
+        checkpoint = torch.load(path, map_location='cpu')
+        model = UNet(**checkpoint['init_args'])
         model.load_state_dict(checkpoint['state_dict'])
         return model
 
 class TestUNet(nn.Module):
-
-
     def __init__(self):
         super().__init__()
-        self.model = UNet(in_channels=3, out_channels=3, base_channels=32)
-    def test_unet_forward_no_mask(self):
+        self.model = UNet(image_size=32, base_channels=32)
+    
+    def test_unet_forward(self):
         batch_size = 1
         h = w = 32
-        x = torch.randn(batch_size, 3, h, w)
+        tokens = torch.randint(0, 3, (batch_size, h, w))  # {0, 1, 2}
         t = torch.randint(0, 1000, (batch_size,))
-        out = self.model(x, t, None)
-        assert out.shape == (batch_size, 3, h, w), "Model output shape mismatch without mask"
+        out = self.model(tokens, t)
+        assert out.shape == (batch_size, 2, h, w), f"Expected [B, 2, H, W], got {out.shape}"
 
     def test_unet_forward_minimal_timestep(self):
         batch_size = 1
         h = w = 32
-        x = torch.randn(batch_size, 3, h, w)
+        tokens = torch.randint(0, 3, (batch_size, h, w))
         t = torch.zeros((batch_size,), dtype=torch.long)
-        mask = torch.ones(batch_size, 1, h, w)
-        out = self.model(x, t, mask)
-        assert out.shape == (batch_size, 3, h, w)
+        out = self.model(tokens, t)
+        assert out.shape == (batch_size, 2, h, w)
 
     def test_unet_input_output_shape(self):
         batch_size = 2
         height = width = 32
-        x = torch.randn(batch_size, 3, height, width)
+        tokens = torch.randint(0, 3, (batch_size, height, width))
         t = torch.randint(0, 1000, (batch_size,))
-        mask = torch.randint(0, 2, (batch_size, 1, height, width)).float()
-        out = self.model(x, t, mask)
-        assert out.shape == (batch_size, 3, height, width), f"Unexpected output shape {out.shape}"
+        out = self.model(tokens, t)
+        assert out.shape == (batch_size, 2, height, width), f"Unexpected output shape {out.shape}"
 
     def run_all_tests(self):
         self.test_unet_input_output_shape()
-        self.test_unet_forward_no_mask()
+        self.test_unet_forward()
         self.test_unet_forward_minimal_timestep()
         print("All UNet tests passed.")
 
