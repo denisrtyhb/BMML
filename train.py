@@ -174,7 +174,6 @@ device = getattr(args, "device", 'cuda' if torch.cuda.is_available() else 'cpu')
 
 
 def train():
-    device=device
     print(f"Device: {device}")
     
     # 1. Setup Data - STRICT BINARY (0.0 or 1.0)
