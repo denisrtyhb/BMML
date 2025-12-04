@@ -8,7 +8,7 @@ from model import UNet
 from dataset import DiscreteMNIST
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-# device = 'cpu'
+device = 'cpu'
 
 
 # Forward process: convert image tokens to masked tokens
@@ -16,13 +16,13 @@ def forward_process(tokens_0, mask):
     """
     Masked diffusion forward process:
     - tokens_0: original tokens [B, H, W] with values {0, 1}
-    - mask: binary mask [B, H, W], 1=preserve pixel, 0=mask pixel
+    - mask: binary mask [B, H, W], 0=preserve pixel, 1=mask pixel
     Returns:
         tokens_t: masked tokens [B, H, W] with values {0, 1, 2}
                   where 2 = MSK (masked pixel)
     """
     tokens_t = tokens_0.clone()
-    tokens_t[mask == 0] = 2  # Set masked pixels to MSK token (2)
+    tokens_t[mask == 1] = 2  # Set masked pixels to MSK token (2)
     return tokens_t
 
 # Training step
@@ -39,35 +39,34 @@ def train_step(model, tokens_0):
     # Sample random timestep (0 to 999)
     t = torch.randint(0, 1000, (batch_size,), device=device)
 
-    # Weight for timestep (optional, can remove if not needed)
-    w = (1000 - t) / (t + 1)
-
     # Generate a mask where each entry has probability (t/1000) of being 0 (masked)
     prob_zero = t.float().view(-1, 1, 1) / 1000.0
     random_tensor = torch.rand(batch_size, tokens_0.shape[1], tokens_0.shape[2], device=device)
     mask = (random_tensor > prob_zero).float()  # [B, H, W], 1=preserve, 0=mask
     
-    # Forward process: create masked tokens
     tokens_t = forward_process(tokens_0, mask)  # [B, H, W] with values {0, 1, 2}
     
-    # Model predicts logits for {0, 1} at each pixel
     logits = model(tokens_t, t)  # [B, 2, H, W]
     
     # Cross-entropy loss only on masked tokens
     # Reshape for cross-entropy: [B, 2, H, W] -> [B*H*W, 2] and [B, H, W] -> [B*H*W]
-    masked_positions = (mask == 0)  # [B, H, W], True where masked
+    masked_positions = (mask == 1)  # [B, H, W], True where masked
     if masked_positions.sum() == 0:
         # No masked tokens, return zero loss
         return torch.tensor(0.0, device=device, requires_grad=True)
-    
+
+    weights = ((1000 - t) / (t + 1)).reshape(batch_size, 1, 1)
+    weights = weights.expand(batch_size, tokens_0.shape[1], tokens_0.shape[2])
+    weights_for_masked_tokens = weights[masked_positions]
+
     logits_flat = logits.permute(0, 2, 3, 1).reshape(-1, 2)  # [B*H*W, 2]
     targets_flat = tokens_0.reshape(-1).long()  # [B*H*W]
     mask_flat = masked_positions.reshape(-1)  # [B*H*W]
     
     # Compute loss only on masked positions
-    loss = F.cross_entropy(logits_flat[mask_flat], targets_flat[mask_flat], reduction='mean')
+    cross_entropy_loss = F.cross_entropy(logits_flat[mask_flat], targets_flat[mask_flat], reduction='none')
     
-    loss = loss * w
+    loss = (cross_entropy_loss * weights_for_masked_tokens).mean()
 
     return loss
 
