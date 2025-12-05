@@ -13,7 +13,7 @@ def parse_args():
     return parser.parse_args()
 
 args = parse_args()
-device = args.device if getattr(args, "device", 'cuda' if torch.cuda.is_available() else 'cpu')
+device = getattr(args, "device", 'cuda' if torch.cuda.is_available() else 'cpu')
 model_path = args.model_path
 output_path = args.output_path
 
