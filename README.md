@@ -66,30 +66,32 @@ python train_ambient.py --n_epochs 20 --consistency_weight 2.0 --output_folder c
 To generate samples from a trained model, use `sample.py`:
 
 ```bash
-python sample.py
+python sample.py --model_path <path_to_checkpoint>
 ```
 
-**Note:** Before running `sample.py`, you need to update the model path in the script to point to your trained checkpoint. 
+**Arguments:**
+- `--model_path`: Path to model checkpoint (required)
+- `--device`: Device to run on ('cuda' or 'cpu'). If not specified, auto-detects CUDA availability
+- `--output_path`: Path to save generated samples (default: "ambient_generated.png")
 
-The script currently tries to load:
-- `mdlm_ambient_consistency.pth` (or `/kaggle/working/simple_gpt_try/mdlm_ambient_consistency.pth`)
+**Examples:**
+```bash
+# Sample from baseline model
+python sample.py --model_path outputs/baseline_mnist_final.pth
 
-To use a trained checkpoint, modify `sample.py` to load your checkpoint:
+# Sample from ambient model
+python sample.py --model_path outputs/ambient_mnist_final.pth --output_path ambient_samples.png
 
-```python
-# For baseline model:
-model.load_state_dict(torch.load("outputs/baseline_mnist_final.pth"))
-
-# For ambient model:
-model.load_state_dict(torch.load("outputs/ambient_mnist_final.pth"))
+# Sample on CPU
+python sample.py --model_path outputs/baseline_mnist_final.pth --device cpu
 ```
 
-**Sampling Parameters:**
+**Sampling Parameters (hardcoded in script):**
 - `steps`: Number of denoising steps (default: 40, more steps = better quality)
 - `b`: Batch size / number of samples to generate (default: 16)
 
 **Output:**
-- Generated samples are saved as `ambient_generated.png` (or `mdlm_binary_result.png` depending on the version)
+- Generated samples are saved to the specified output path (default: `ambient_generated.png`)
 - The script generates binary MNIST digits by iteratively unmasking pixels over multiple steps
 
 ## Requirements
