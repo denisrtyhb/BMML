@@ -67,7 +67,7 @@ def calculate_consistency_loss(model, x_obs, t_obs, device):
     # --- LOSS ---
     # The student should produce the same probabilities as the teacher
     # (Soft Targets)
-    cons_loss = F.binary_cross_entropy_with_logits(student_logits, pred_logits_teacher)
+    cons_loss = F.binary_cross_entropy_with_logits(student_logits, pred_x0_teacher_probs)
     
     return cons_loss
 
