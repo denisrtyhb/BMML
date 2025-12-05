@@ -17,7 +17,7 @@ args = parser.parse_args()
 n_epochs = getattr(args, "n_epochs", 10)
 output_folder = getattr(args, "output_folder", "outputs")
 
-device = args.device if getattr(args, "device", 'cuda' if torch.cuda.is_available() else 'cpu')
+device = getattr(args, "device", 'cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Device: {device}")
 
 # Ensure output folder exists
