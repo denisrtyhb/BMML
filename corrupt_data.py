@@ -92,6 +92,6 @@ def visualize_corruption(percentage=0.5):
     plt.savefig(save_path)
     print(f"Saved preview to {save_path}")
 
-if name == "__main__":
+if __name__ == "__main__":
     # Test with 50% missing pixels
     visualize_corruption(percentage=0.5)
