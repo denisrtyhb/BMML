@@ -26,7 +26,7 @@ os.makedirs(output_folder, exist_ok=True)
 
 def train():
     
-    # DATASET: 50% Corrupted (Ambient Setting)
+    # DATASET: 10% Corrupted
     OBSERVED_MASK_PCT = 0.1
     dataset = CorruptedMNIST(mask_percentage=OBSERVED_MASK_PCT, train=True)
     loader = DataLoader(dataset, batch_size=64, shuffle=True, num_workers=2)

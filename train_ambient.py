@@ -4,6 +4,24 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from unet import UNet
 from corrupt_data import CorruptedMNIST
+import argparse
+import os
+
+parser = argparse.ArgumentParser(description="Train ambient model on CorruptedMNIST")
+parser.add_argument("--n_epochs", type=int, default=10, help="Number of epochs to train for")
+parser.add_argument("--device", type=str, default=None, help="Device to run on ('cuda', 'cpu'); if None, auto-detect")
+parser.add_argument("--output_folder", type=str, default="outputs", help="Folder to save outputs/checkpoints")
+parser.add_argument("--consistency_weight", type=float, default=1.0, help="Weight for consistency loss")
+args = parser.parse_args()
+
+n_epochs = getattr(args, "n_epochs", 10)
+output_folder = getattr(args, "output_folder", "outputs")
+consistency_weight = getattr(args, "consistency_weight", 1.0)
+device = getattr(args, "device", 'cuda' if torch.cuda.is_available() else 'cpu')
+print(f"Device: {device}")
+
+# Ensure output folder exists
+os.makedirs(output_folder, exist_ok=True)
 
 def calculate_consistency_loss(model, x_obs, t_obs, device):
     """
@@ -25,19 +43,12 @@ def calculate_consistency_loss(model, x_obs, t_obs, device):
         
         # Construct the "Hallucinated Clean Image"
         # Keep real pixels where we have them, use prediction where we don't
-        x_filled = x_obs * (1 - mask_obs) + (pred_x0_hard * 2 - 1) * mask_obs
-        # Note: mapping 0/1 prediction to -1/1 logic? 
-        # Actually, prediction is 0/1. Masked input is -1. 
-        # So: (0 or 1) * mask_obs. 
-        # But wait, input to UNet expects -1 for masks. 
-        # Here x_filled should contain NO masks (it's the clean hallucination).
-        # So it should be 0.0 or 1.0.
         x_filled = x_obs * (1 - mask_obs) + pred_x0_hard * mask_obs
 
     # --- STUDENT STEP ---
     # 3. Create a state with LESS noise than observation
-    # e.g. if obs is 50% masked, student sees 40% masked
-    t_student = t_obs - 0.1
+    # e.g. if obs is 0.1 masked, student sees 0.05 masked
+    t_student = t_obs - 0.05
     t_student = torch.clamp(t_student, min=0.001)
     
     # Generate new mask for student
@@ -56,15 +67,12 @@ def calculate_consistency_loss(model, x_obs, t_obs, device):
     # --- LOSS ---
     # The student should produce the same probabilities as the teacher
     # (Soft Targets)
-    cons_loss = F.binary_cross_entropy_with_logits(student_logits, pred_x0_teacher_probs)
+    cons_loss = F.binary_cross_entropy_with_logits(student_logits, pred_logits_teacher)
     
     return cons_loss
 
 def train():
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    print(f"Device: {device}")
-    
-    # DATASET: 50% Corrupted (Ambient Setting)
+    # DATASET: 10% Corrupted (Ambient Setting)
     OBSERVED_MASK_PCT = 0.1
     dataset = CorruptedMNIST(mask_percentage=OBSERVED_MASK_PCT, train=True)
     loader = DataLoader(dataset, batch_size=64, shuffle=True, num_workers=2)
@@ -72,9 +80,7 @@ def train():
     model = UNet().to(device)
     optim = torch.optim.AdamW(model.parameters(), lr=1e-4)
     
-    epochs = 10
-    
-    for epoch in range(epochs):
+    for epoch in range(n_epochs):
         model.train()
         pbar = tqdm(loader, desc=f"Epoch {epoch+1}")
         
@@ -126,7 +132,8 @@ def train():
             loss_hard = calculate_consistency_loss(model, x_obs, t_dataset, device)
             
             # Total Loss
-            loss = loss_easy + loss_hard
+
+            loss = loss_easy + loss_hard * consistency_weight
             
             optim.zero_grad()
             loss.backward()
@@ -134,8 +141,10 @@ def train():
             optim.step()
             
             pbar.set_postfix(easy=loss_easy.item(), hard=loss_hard.item())
-            
-    torch.save(model.state_dict(), "mdlm_ambient_consistency.pth")
+        # Save the model every 5 epochs
+        if (epoch + 1) % 5 == 0:
+            torch.save(model.state_dict(), os.path.join(output_folder, f"ambient_mnist_epoch{epoch+1}.pth"))
+    torch.save(model.state_dict(), os.path.join(output_folder, "ambient_mnist_final.pth"))
     print("Training Done.")
 
 if __name__ == "__main__":
