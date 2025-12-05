@@ -131,6 +131,72 @@ from unet import UNet
 
 # if __name__ == "__main__":
 #     simple_sample()
+<<<<<<< HEAD
+=======
+# import torch
+# from torchvision.utils import save_image
+# from unet import UNet
+
+# def simple_sample():
+#     device = 'cuda' if torch.cuda.is_available() else 'cpu'
+#     model = UNet().to(device)
+    
+#     try:
+#         model.load_state_dict(torch.load("mdlm_mnist_binary.pth"))
+#     except:
+#         model.load_state_dict(torch.load("/kaggle/working/simple_gpt_try/mdlm_mnist_binary.pth"))
+        
+#     model.eval()
+    
+#     steps = 40
+#     b = 16
+    
+#     # Start: Image is 0.5 (Gray/Neutral) or 0.
+#     # Since we have a mask channel, setting image to 0 is fine.
+#     img = torch.zeros(b, 1, 28, 28).to(device)
+    
+#     # Start: Mask is all 1s
+#     mask = torch.ones(b, 1, 28, 28).to(device)
+    
+#     print("Sampling Binary Digits...")
+#     with torch.no_grad():
+#         for i in range(steps):
+#             t_val = 1.0 - (i / steps)
+#             t_vec = torch.full((b,), t_val, device=device)
+            
+#             # 1. Predict Logits
+#             pred_logits = model(img, t_vec * 1000, mask)
+            
+#             # 2. Convert to Probability (0.0 to 1.0)
+#             probs = torch.sigmoid(pred_logits)
+            
+#             # 3. SAMPLE (The Key Step)
+#             # Instead of keeping the float value, we flip a coin based on probability.
+#             # This makes the image Binary (0 or 1), removing blur.
+#             sampled_prediction = torch.bernoulli(probs)
+            
+#             # 4. Update Image
+#             # Keep known pixels, fill unknown with SAMPLED prediction
+#             img = (1 - mask) * img + mask * sampled_prediction
+            
+#             # 5. Determine Next Mask
+#             next_t_val = 1.0 - ((i + 1) / steps)
+#             random_mask = torch.rand(b, 1, 28, 28).to(device)
+#             new_desired_mask = (random_mask < next_t_val).float()
+            
+#             # Intersection
+#             mask = mask * new_desired_mask
+            
+#             # Apply mask to image (Zero out unknown parts for the next pass)
+#             img = img * (1 - mask)
+            
+#     save_image(img, "mdlm_binary_result.png")
+#     print("Saved mdlm_binary_result.png")
+
+# if __name__ == "__main__":
+#     simple_sample()
+
+>>>>>>> deez_nuts
 import torch
 from torchvision.utils import save_image
 from unet import UNet
@@ -139,16 +205,25 @@ def simple_sample():
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     model = UNet().to(device)
     
+<<<<<<< HEAD
     try:
         model.load_state_dict(torch.load("mdlm_mnist_binary.pth"))
     except:
         model.load_state_dict(torch.load("/kaggle/working/simple_gpt_try/mdlm_mnist_binary.pth"))
+=======
+    # Load the AMBIENT trained model
+    try:
+        model.load_state_dict(torch.load("mdlm_ambient_consistency.pth"))
+    except:
+        model.load_state_dict(torch.load("/kaggle/working/simple_gpt_try/mdlm_ambient_consistency.pth"))
+>>>>>>> deez_nuts
         
     model.eval()
     
     steps = 40
     b = 16
     
+<<<<<<< HEAD
     # Start: Image is 0.5 (Gray/Neutral) or 0.
     # Since we have a mask channel, setting image to 0 is fine.
     img = torch.zeros(b, 1, 28, 28).to(device)
@@ -157,11 +232,19 @@ def simple_sample():
     mask = torch.ones(b, 1, 28, 28).to(device)
     
     print("Sampling Binary Digits...")
+=======
+    # Start: Fully Masked (-1.0)
+    img = torch.full((b, 1, 28, 28), -1.0, device=device)
+    mask = torch.ones(b, 1, 28, 28).to(device)
+    
+    print("Sampling from Ambient Model...")
+>>>>>>> deez_nuts
     with torch.no_grad():
         for i in range(steps):
             t_val = 1.0 - (i / steps)
             t_vec = torch.full((b,), t_val, device=device)
             
+<<<<<<< HEAD
             # 1. Predict Logits
             pred_logits = model(img, t_vec * 1000, mask)
             
@@ -190,6 +273,27 @@ def simple_sample():
             
     save_image(img, "mdlm_binary_result.png")
     print("Saved mdlm_binary_result.png")
+=======
+            # Predict
+            pred_logits = model(img, t_vec * 1000, mask)
+            probs = torch.sigmoid(pred_logits)
+            sampled_prediction = torch.bernoulli(probs)
+            
+            # Update Image
+            img = (1 - mask) * img + mask * sampled_prediction
+            
+            # Next Mask
+            next_t_val = 1.0 - ((i + 1) / steps)
+            random_mask = torch.rand(b, 1, 28, 28).to(device)
+            new_desired_mask = (random_mask < next_t_val).float()
+            mask = mask * new_desired_mask
+            
+            # Re-apply -1 to masks
+            img = img * (1 - mask) - 1.0 * mask
+            
+    save_image(img, "ambient_generated.png")
+    print("Saved ambient_generated.png")
+>>>>>>> deez_nuts
 
 if __name__ == "__main__":
     simple_sample()
