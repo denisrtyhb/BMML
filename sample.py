@@ -8,7 +8,7 @@ import os
 def parse_args():
     parser = argparse.ArgumentParser(description="Sample from the Ambient Model")
     parser.add_argument("--device", default=None, type=str, help="Device to use: 'cuda' or 'cpu'")
-    parser.add_argument("--model_path", default="mdlm_mnist_binary.pth", type=str, help="Path to model weights")
+    parser.add_argument("--model_path", type=str, help="Path to model weights")
     parser.add_argument("--output_path", default="ambient_generated.png", type=str, help="Output image path")
     return parser.parse_args()
 
