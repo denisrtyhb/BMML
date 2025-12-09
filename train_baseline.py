@@ -82,7 +82,7 @@ def train():
             
             # Target is x_obs (0.0 or 1.0)
             loss = F.binary_cross_entropy_with_logits(pred_logits, x_obs, reduction='none')
-            loss = (loss * learnable_region).sum() / (learnable_region.sum() + 1e-6)
+            loss = (loss * learnable_region * t_easy).sum() / (learnable_region.sum() + 1e-6)
             
             optim.zero_grad()
             loss.backward()

@@ -40,24 +40,21 @@ def calculate_consistency_loss(model, x_obs, t_obs, device):
     
     # --- TEACHER STEP ---
     # 1. Predict full clean image from the corrupted observation
-    with torch.no_grad():
-        mask_obs = (x_obs == -1).float()
-        pred_logits_teacher = model(x_obs, t_obs * 1000, mask_obs)
-        pred_x0_teacher_probs = torch.sigmoid(pred_logits_teacher)
-        
-        # 2. Impute: Fill the holes in x_obs with the teacher's guess
-        # We sample a hard 0/1 to simulate a valid clean image
-        pred_x0_hard = torch.bernoulli(pred_x0_teacher_probs)
-        
-        # Construct the "Hallucinated Clean Image"
-        # Keep real pixels where we have them, use prediction where we don't
-        x_filled = x_obs * (1 - mask_obs) + pred_x0_hard * mask_obs
+    mask_obs = (x_obs == -1).float()
+    pred_logits_teacher = model(x_obs, t_obs * 1000, mask_obs)
+    pred_x0_teacher_probs = torch.sigmoid(pred_logits_teacher)
+    
+    # 2. Impute: Fill the holes in x_obs with the teacher's guess
+    # We sample a hard 0/1 to simulate a valid clean image
+    pred_x0_hard = torch.bernoulli(pred_x0_teacher_probs)
+    
+    # Construct the "Hallucinated Clean Image"
+    # Keep real pixels where we have them, use prediction where we don't
 
-    # --- STUDENT STEP ---
-    # 3. Create a state with LESS noise than observation
-    # e.g. if obs is 0.1 masked, student sees 0.05 masked
-    t_student = t_obs - 0.05
-    t_student = torch.clamp(t_student, min=0.001)
+    with torch.no_grad():
+        x_filled = x_obs * (1 - mask_obs) + pred_x0_hard * mask_obs
+        t_student = t_obs - 0.05
+        t_student = torch.clamp(t_student, min=0.001)
     
     # Generate new mask for student
     mask_probs = t_student.view(-1, 1, 1, 1).expand(b, 1, h, w)
@@ -82,8 +79,7 @@ def calculate_consistency_loss(model, x_obs, t_obs, device):
 from evaluate import evaluate
 
 def train():
-    # DATASET: 10% Corrupted (Ambient Setting)
-    OBSERVED_MASK_PCT = 0.1
+    # DATASET: 10% Corrupted (Ambient Setting from command line)
     dataset = CorruptedMNIST(mask_percentage=OBSERVED_MASK_PCT, train=True)
     loader = DataLoader(dataset, batch_size=64, shuffle=True, num_workers=2)
     
@@ -138,7 +134,7 @@ def train():
             
             # Target is x_obs (0.0 or 1.0)
             loss_easy = F.binary_cross_entropy_with_logits(pred_logits, x_obs, reduction='none')
-            loss_easy = (loss_easy * learnable_region).sum() / (learnable_region.sum() + 1e-6)
+            loss_easy = (loss_easy * learnable_region * t_easy).sum() / (learnable_region.sum() + 1e-6)
             
             # --- TASK 2: HARD LOSS (Consistency) ---
             # Train on noise levels LOWER than dataset (e.g. 0.4, 0.2)
