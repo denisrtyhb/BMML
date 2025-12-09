@@ -23,6 +23,8 @@ consistency_weight = getattr(args, "consistency_weight", 1.0)
 eval_every = getattr(args, "eval_every", 1000)
 device = getattr(args, "device", 'cuda' if torch.cuda.is_available() else 'cpu')
 OBSERVED_MASK_PCT = getattr(args, "observed_mask_pct", 0.1)
+if OBSERVED_MASK_PCT > 1:
+    OBSERVED_MASK_PCT = OBSERVED_MASK_PCT / 100
 print(f"Device: {device}")
 
 # Ensure output folder exists
@@ -87,11 +89,12 @@ def evaluate(model, device, output_folder, iteration):
         iteration: Current iteration number
     """
     model.eval()
-    
+
     # Load test dataset
     test_dataset = CorruptedMNIST(mask_percentage=OBSERVED_MASK_PCT, train=False)
+    print("Len of test dataset: ", len(test_dataset))
     test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False, num_workers=2)
-    
+    print("Len of test loader: ", len(test_loader))
     total_easy_loss = 0.0
     total_hard_loss = 0.0
     num_batches = 0
