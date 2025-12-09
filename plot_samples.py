@@ -20,7 +20,7 @@ def simple_sample():
     model.load_state_dict(torch.load(model_path))
     model.eval() 
     steps = 40
-    b = 16
+    b = 32
     
     # Start: Fully Masked (-1.0)
     img = torch.full((b, 1, 28, 28), -1.0, device=device)
