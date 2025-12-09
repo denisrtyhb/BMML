@@ -73,6 +73,8 @@ def train():
             
             # Predict
             pred_logits = model(x_input, t_easy * 1000, final_mask)
+
+            print("Shapes: ", x_input.shape, pred_logits.shape)
             
             # Loss Calculation
             # We only learn on pixels that are:
