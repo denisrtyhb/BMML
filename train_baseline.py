@@ -7,6 +7,7 @@ from corrupt_data import CorruptedMNIST
 import argparse
 import os
 from torchvision.utils import save_image, make_grid
+from evaluate import evaluate
 
 parser = argparse.ArgumentParser(description="Train baseline model on CorruptedMNIST")
 parser.add_argument("--n_epochs", type=int, default=10, help="Number of epochs to train for")
