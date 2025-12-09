@@ -49,12 +49,23 @@ def simple_sample():
             # Re-apply -1 to masks
             img = img * (1 - mask) - 1.0 * mask
             
-    # Show the generated image using matplotlib
-    img = img.squeeze(0).cpu().numpy()  # Convert the image to a numpy array and squeeze the batch dimension
-    print(img.shape, img[0].shape)
-    plt.imshow(img[0], cmap='gray')  # Display the first sample from the batch
-    plt.axis('off')  # Remove axes for better visualization
+    img = img.squeeze(1).cpu().numpy()  # Remove the channel dimension and move to CPU
+
+    # Create a grid of 4x4 subplots
+    fig, axes = plt.subplots(4, 8, figsize=(10, 10))  # 4 rows, 4 columns
+    
+    # Flatten the axes to iterate over them
+    axes = axes.flatten()
+    
+    # Plot each image in a subplot
+    for i in range(b):
+        axes[i].imshow(img[i], cmap='gray')
+        axes[i].axis('off')  # Hide axis
+    
+    # Adjust layout to prevent overlap
+    plt.tight_layout()
     plt.show()
+    
 
 if __name__ == "__main__":
     simple_sample()
