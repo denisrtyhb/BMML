@@ -13,11 +13,13 @@ parser.add_argument("--n_epochs", type=int, default=10, help="Number of epochs t
 parser.add_argument("--device", type=str, default=None, help="Device to run on ('cuda', 'cpu'); if None, auto-detect")
 parser.add_argument("--output_folder", type=str, default="outputs", help="Folder to save outputs/checkpoints")
 parser.add_argument("--consistency_weight", type=float, default=1.0, help="Weight for consistency loss")
+parser.add_argument("--eval_every", type=int, default=1000, help="Run evaluation every N iterations")
 args = parser.parse_args()
 
 n_epochs = getattr(args, "n_epochs", 10)
 output_folder = getattr(args, "output_folder", "outputs")
 consistency_weight = getattr(args, "consistency_weight", 1.0)
+eval_every = getattr(args, "eval_every", 1000)
 device = getattr(args, "device", 'cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Device: {device}")
 
@@ -99,6 +101,7 @@ def evaluate(model, device, output_folder, iteration):
     all_mask_obs = []
     all_x_filled = []
     all_pred_x0_teacher_probs = []
+    all_denoised_005 = []
 
     model.eval()
     with torch.no_grad():
@@ -117,27 +120,53 @@ def evaluate(model, device, output_folder, iteration):
             pred_x0_hard = (pred_x0_teacher_probs > 0.5).float()
             x_filled = x_obs * (1 - mask_obs) + pred_x0_hard * mask_obs
 
+            # Denoising result at time = (OBSERVED_MASK_PCT - 0.05), clamped at min 0.001
+            t_denoise = torch.clamp(t_dataset - 0.05, min=0.001)
+
+            # Partly denoise x_obs before passing to model
+            def remove_half_masked(mask):
+                mask = mask.clone()
+                masked_indices = (mask == 1).nonzero(as_tuple=True)
+                num_to_unmask = masked_indices[0].numel() // 2
+                if num_to_unmask > 0:
+                    unmask_idxs = torch.randperm(masked_indices[0].numel(), device=mask.device)[:num_to_unmask]
+                    for dim, idxs in enumerate(masked_indices):
+                        masked_indices = tuple(i[unmask_idxs] if dim == d else i for d, i in enumerate(masked_indices))
+                    mask[masked_indices] = 0
+                return mask
+
+            partly_denoised_mask = remove_half_masked(mask_obs)
+            
+            partly_denoised_input = x_filled * (1 - partly_denoised_mask) + x_obs * partly_denoised_mask
+
+            denoise_logits = model(partly_denoised_input, t_denoise * 1000, mask_obs)
+            denoise_probs = torch.sigmoid(denoise_logits)
+
             all_x_obs.append(x_obs.cpu())
             all_mask_obs.append(mask_obs.cpu())
             all_x_filled.append(x_filled.cpu())
             all_pred_x0_teacher_probs.append(pred_x0_teacher_probs.cpu())
+            all_denoised_005.append(denoise_probs.cpu())
 
     # Stack all batches
     all_x_obs = torch.cat(all_x_obs, dim=0)
     all_mask_obs = torch.cat(all_mask_obs, dim=0)
     all_x_filled = torch.cat(all_x_filled, dim=0)
     all_pred_x0_teacher_probs = torch.cat(all_pred_x0_teacher_probs, dim=0)
+    all_denoised_005 = torch.cat(all_denoised_005, dim=0)
 
-    # Save all images in one PNG: one column per sample, each row = (x_obs, mask, x_filled, teacher_probs)
+    # Save all images in one PNG: one column per sample, each row = (x_obs, mask, x_filled, teacher_probs, denoised_0.05)
     nshow = min(64, all_x_obs.shape[0])
     # Normalize/unnormalize for display consistency
     mask_vis = all_mask_obs[:nshow]
     x_obs_vis = all_x_obs[:nshow]
     x_filled_vis = all_x_filled[:nshow]
     teacher_probs_vis = all_pred_x0_teacher_probs[:nshow]
+    denoised_005_vis = all_denoised_005[:nshow]
 
     # For mask, repeat to 3 channels so it's visually clear
     def to_rgb_grid(x):
+        x[x == -1] = 0.5 # display masked pixels as gray
         if x.shape[1] == 1:
             return x.repeat(1, 3, 1, 1)
         return x
@@ -146,7 +175,8 @@ def evaluate(model, device, output_folder, iteration):
         to_rgb_grid(x_obs_vis),
         to_rgb_grid(mask_vis),
         to_rgb_grid(x_filled_vis),
-        to_rgb_grid(teacher_probs_vis)
+        to_rgb_grid(teacher_probs_vis),
+        to_rgb_grid(denoised_005_vis)
     ]  # each is (nshow, 3, 28, 28)
 
     vis_tensor = torch.cat(vis_tensors, dim=0)  # (4*nshow, 3, h, w)
@@ -278,8 +308,8 @@ def train():
             
             pbar.set_postfix(easy=loss_easy.item(), hard=loss_hard.item(), iter=iteration)
             
-            # Evaluate every 1000 iterations
-            if iteration % 1000 == 0:
+            # Evaluate every eval_every iterations
+            if iteration % eval_every == 0:
                 evaluate(model, device, output_folder, iteration)
         
         # Save the model every 5 epochs
