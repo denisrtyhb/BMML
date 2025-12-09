@@ -20,9 +20,7 @@ def evaluate(model, device, output_folder, iteration, OBSERVED_MASK_PCT):
 
     # Load test dataset
     test_dataset = CorruptedMNIST(mask_percentage=OBSERVED_MASK_PCT, train=False)
-    print("Len of test dataset: ", len(test_dataset))
     test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False, num_workers=2)
-    print("Len of test loader: ", len(test_loader))
     total_easy_loss = 0.0
     total_hard_loss = 0.0
     num_batches = 0
