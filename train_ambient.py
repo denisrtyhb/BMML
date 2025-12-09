@@ -166,10 +166,16 @@ def evaluate(model, device, output_folder, iteration):
 
     # For mask, repeat to 3 channels so it's visually clear
     def to_rgb_grid(x):
-        x[x == -1] = 0.5 # display masked pixels as gray
-        if x.shape[1] == 1:
-            return x.repeat(1, 3, 1, 1)
-        return x
+        # Display masked pixels as purple ([0.5, 0, 0.5])
+        x_rgb = x.clone()
+        if x_rgb.shape[1] == 1:
+            x_rgb = x_rgb.repeat(1, 3, 1, 1)
+        mask = (x == -1)
+        # Set R and B to 0.5 (purple), G to 0
+        x_rgb[:, 0][mask[:, 0]] = 0.5  # R
+        x_rgb[:, 1][mask[:, 0]] = 0.0  # G
+        x_rgb[:, 2][mask[:, 0]] = 0.5  # B
+        return x_rgb
 
     vis_tensors = [
         to_rgb_grid(x_obs_vis),
@@ -298,7 +304,7 @@ def train():
             loss_hard = calculate_consistency_loss(model, x_obs, t_dataset, device)
             
             # Total Loss
-
+    
             loss = loss_easy + loss_hard * consistency_weight
             
             optim.zero_grad()
