@@ -9,6 +9,7 @@ import os
 
 parser = argparse.ArgumentParser(description="Train baseline model on CorruptedMNIST")
 parser.add_argument("--n_epochs", type=int, default=10, help="Number of epochs to train for")
+parser.add_argument("--batch_size", type=int, default=64, help="Batch size")
 parser.add_argument("--device", type=str, default=None, help="Device to run on ('cuda', 'cpu'); if None, auto-detect")
 parser.add_argument("--output_folder", type=str, default="outputs", help="Folder to save outputs/checkpoints")
 
@@ -16,6 +17,7 @@ args = parser.parse_args()
 
 n_epochs = getattr(args, "n_epochs", 10)
 output_folder = getattr(args, "output_folder", "outputs")
+batch_size = getattr(args, "batch_size", 64)
 
 device = getattr(args, "device", 'cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Device: {device}")
@@ -29,7 +31,7 @@ def train():
     # DATASET: 10% Corrupted
     OBSERVED_MASK_PCT = 0.1
     dataset = CorruptedMNIST(mask_percentage=OBSERVED_MASK_PCT, train=True)
-    loader = DataLoader(dataset, batch_size=64, shuffle=True, num_workers=2)
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=2)
     
     model = UNet().to(device)
     optim = torch.optim.AdamW(model.parameters(), lr=1e-4)

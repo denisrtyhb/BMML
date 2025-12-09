@@ -9,21 +9,22 @@ This repository contains code for training and sampling from masked diffusion mo
 To train the baseline model, use `train_baseline.py`:
 
 ```bash
-python train_baseline.py --n_epochs 10 --output_folder outputs
+python train_baseline.py --n_epochs 10 --batch_size 64 --output_folder outputs
 ```
 
 **Arguments:**
 - `--n_epochs`: Number of training epochs (default: 10)
+- `--batch_size`: Batch szie
 - `--device`: Device to run on ('cuda' or 'cpu'). If not specified, auto-detects CUDA availability
 - `--output_folder`: Folder to save model checkpoints (default: "outputs")
 
 **Example:**
 ```bash
 # Train for 20 epochs on GPU
-python train_baseline.py --n_epochs 20 --device cuda --output_folder checkpoints
+python train_baseline.py --n_epochs 20 --batch_size 64 --device cuda --output_folder checkpoints
 
 # Train for 10 epochs on CPU
-python train_baseline.py --n_epochs 10 --device cpu
+python train_baseline.py --n_epochs 10 --batch_size 64 --device cpu
 ```
 
 **Output:**
