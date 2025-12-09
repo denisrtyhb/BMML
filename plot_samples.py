@@ -51,6 +51,7 @@ def simple_sample():
             
     # Show the generated image using matplotlib
     img = img.squeeze(0).cpu().numpy()  # Convert the image to a numpy array and squeeze the batch dimension
+    print(img.shape, img[0].shape)
     plt.imshow(img[0], cmap='gray')  # Display the first sample from the batch
     plt.axis('off')  # Remove axes for better visualization
     plt.show()
