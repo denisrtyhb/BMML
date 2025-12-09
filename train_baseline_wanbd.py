@@ -12,11 +12,13 @@ parser = argparse.ArgumentParser(description="Train baseline model on CorruptedM
 parser.add_argument("--n_epochs", type=int, default=10, help="Number of epochs to train for")
 parser.add_argument("--batch_size", type=int, default=64, help="Batch size")
 parser.add_argument("--device", type=str, default=None, help="Device to run on ('cuda', 'cpu'); if None, auto-detect")
+parser.add_argument("--api_wanbd", type=str, default=None, help="API key for logging the training")
 parser.add_argument("--output_folder", type=str, default="outputs", help="Folder to save outputs/checkpoints")
 
 args = parser.parse_args()
 
 n_epochs = getattr(args, "n_epochs", 10)
+api_key = getattr(args, "api_wanbd", 'key')
 batch_size = getattr(args, "batch_size", 64)
 output_folder = getattr(args, "output_folder", "outputs")
 device = getattr(args, "device", 'cuda' if torch.cuda.is_available() else 'cpu')
@@ -26,6 +28,7 @@ os.makedirs(output_folder, exist_ok=True)
 
 def train():
     # Initialize W&B logging
+    os.environ['WANDB_API_KEY'] = api_key
     wandb.init(
         project="corrupted-mnist-baseline",
         config={
