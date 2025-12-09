@@ -10,14 +10,15 @@ import os
 
 parser = argparse.ArgumentParser(description="Train baseline model on CorruptedMNIST")
 parser.add_argument("--n_epochs", type=int, default=10, help="Number of epochs to train for")
+parser.add_argument("--batch_size", type=int, default=64, help="Batch size")
 parser.add_argument("--device", type=str, default=None, help="Device to run on ('cuda', 'cpu'); if None, auto-detect")
 parser.add_argument("--output_folder", type=str, default="outputs", help="Folder to save outputs/checkpoints")
 
 args = parser.parse_args()
 
 n_epochs = getattr(args, "n_epochs", 10)
+batch_size = getattr(args, "batch_size", 64)
 output_folder = getattr(args, "output_folder", "outputs")
-
 device = getattr(args, "device", 'cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Device: {device}")
 
@@ -29,7 +30,7 @@ def train():
         project="corrupted-mnist-baseline",
         config={
             "epochs": n_epochs,
-            "batch_size": 64,
+            "batch_size": batch_size,
             "obs_mask_pct": 0.1,
             "lr": 1e-4,
             "device": device,
