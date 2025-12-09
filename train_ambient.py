@@ -14,6 +14,7 @@ parser.add_argument("--device", type=str, default=None, help="Device to run on (
 parser.add_argument("--output_folder", type=str, default="outputs", help="Folder to save outputs/checkpoints")
 parser.add_argument("--consistency_weight", type=float, default=1.0, help="Weight for consistency loss")
 parser.add_argument("--eval_every", type=int, default=1000, help="Run evaluation every N iterations")
+parser.add_argument("--observed_mask_pct", type=float, default=0.1, help="Percentage of pixels that are observed (not masked) in the dataset")
 args = parser.parse_args()
 
 n_epochs = getattr(args, "n_epochs", 10)
@@ -21,6 +22,7 @@ output_folder = getattr(args, "output_folder", "outputs")
 consistency_weight = getattr(args, "consistency_weight", 1.0)
 eval_every = getattr(args, "eval_every", 1000)
 device = getattr(args, "device", 'cuda' if torch.cuda.is_available() else 'cpu')
+OBSERVED_MASK_PCT = getattr(args, "observed_mask_pct", 0.1)
 print(f"Device: {device}")
 
 # Ensure output folder exists
@@ -85,7 +87,6 @@ def evaluate(model, device, output_folder, iteration):
         iteration: Current iteration number
     """
     model.eval()
-    OBSERVED_MASK_PCT = 0.1
     
     # Load test dataset
     test_dataset = CorruptedMNIST(mask_percentage=OBSERVED_MASK_PCT, train=False)
