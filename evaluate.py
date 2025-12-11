@@ -35,10 +35,10 @@ def evaluate(model, device, output_folder, iteration, OBSERVED_MASK_PCT):
 
     model.eval()
     with torch.no_grad():
-        iteration = 0
+        it = 0
         for x_obs, mask_obs, _ in test_loader:
-            iteration += 1
-            if iteration == 5:
+            it += 1
+            if it == 5:
                 break
             x_obs = x_obs.to(device)
             mask_obs = mask_obs.to(device)
