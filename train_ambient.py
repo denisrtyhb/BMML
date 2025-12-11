@@ -182,12 +182,12 @@ def train():
             optim.step()
             
             easy_loss_total += loss_easy.item()
-            hard_loss_total += loss_hard.item()
             num_batches += 1
 
             if epoch < start_consistency_epoch:
                 pbar.set_postfix(easy=easy_loss_total/num_batches, iter=iteration)
             else:
+                hard_loss_total += loss_hard.item()
                 pbar.set_postfix(easy=easy_loss_total/num_batches, hard=hard_loss_total/num_batches, iter=iteration)
             
             # Evaluate every eval_every iterations
