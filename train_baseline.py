@@ -15,17 +15,27 @@ parser.add_argument("--device", type=str, default=None, help="Device to run on (
 parser.add_argument("--output_folder", type=str, default="outputs", help="Folder to save outputs/checkpoints")
 parser.add_argument("--eval_every", type=int, default=1000, help="Run evaluation every N iterations (not used in baseline)")
 parser.add_argument("--observed_mask_pct", type=float, default=0.1, help="Percentage of pixels that are observed (not masked) in the dataset")
+parser.add_argument("--batch_size", type=int, default=64, help="Batch size for training")
 
 args = parser.parse_args()
 
 n_epochs = getattr(args, "n_epochs", 10)
 output_folder = getattr(args, "output_folder", "outputs")
 eval_every = getattr(args, "eval_every", 1000)
+batch_size = getattr(args, "batch_size", 64)
 device = getattr(args, "device", 'cuda' if torch.cuda.is_available() else 'cpu')
 OBSERVED_MASK_PCT = getattr(args, "observed_mask_pct", 0.1)
 if OBSERVED_MASK_PCT > 1:
     OBSERVED_MASK_PCT = OBSERVED_MASK_PCT / 100
-print(f"Device: {device}")
+
+print("Arguments:")
+print(f"n_epochs: {n_epochs}")
+print(f"output_folder: {output_folder}")
+print(f"eval_every: {eval_every}")
+print(f"batch_size: {batch_size}")
+print(f"device: {device}")
+print(f"OBSERVED_MASK_PCT: {OBSERVED_MASK_PCT}")
+
 
 # Ensure output folder exists
 os.makedirs(output_folder, exist_ok=True)
@@ -34,9 +44,12 @@ def train():
     
     # DATASET: Use observed_mask_pct from command line
     dataset = CorruptedMNIST(mask_percentage=OBSERVED_MASK_PCT, train=True)
-    loader = DataLoader(dataset, batch_size=64, shuffle=True, num_workers=2)
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=2)
     
     model = UNet().to(device)
+    
+    num_params = sum(p.numel() for p in model.parameters())
+    print(f"Number of model parameters: {num_params}")
     optim = torch.optim.AdamW(model.parameters(), lr=1e-4)
     
     # Track total iterations for evaluation
