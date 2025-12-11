@@ -17,7 +17,7 @@ parser.add_argument("--consistency_weight", type=float, default=1.0, help="Weigh
 parser.add_argument("--eval_every", type=int, default=1000, help="Run evaluation every N iterations")
 parser.add_argument("--observed_mask_pct", type=float, default=0.1, help="Percentage of pixels that are observed (not masked) in the dataset")
 parser.add_argument("--batch_size", type=int, default=64, help="Batch size for training")
-parser.add_argument("--start_consistency_step", type=float, default=0, help="Step back for consistency loss")
+parser.add_argument("--start_consistency_epoch", type=int, default=0, help="Epoch to start consistency loss")
 args = parser.parse_args()
 
 n_epochs = getattr(args, "n_epochs", 10)
@@ -25,7 +25,7 @@ output_folder = getattr(args, "output_folder", "outputs")
 consistency_weight = getattr(args, "consistency_weight", 1.0)
 batch_size = getattr(args, "batch_size", 64)
 device = getattr(args, "device", 'cuda' if torch.cuda.is_available() else 'cpu')
-start_consistency_step = getattr(args, "start_consistency_step", 10000)
+start_consistency_epoch = getattr(args, "start_consistency_epoch", 10000)
 
 
 OBSERVED_MASK_PCT = getattr(args, "observed_mask_pct", 0.1)
@@ -35,7 +35,7 @@ print("Arguments:")
 print(f"n_epochs: {n_epochs}")
 print(f"output_folder: {output_folder}")
 print(f"consistency_weight: {consistency_weight}")
-print(f"start_consistency_step: {start_consistency_step}")
+print(f"start_consistency_epoch: {start_consistency_epoch}")
 print(f"batch_size: {batch_size}")
 print(f"device: {device}")
 print(f"OBSERVED_MASK_PCT: {OBSERVED_MASK_PCT}")
@@ -163,7 +163,7 @@ def train():
             # --- TASK 2: HARD LOSS (Consistency) ---
             # Train on noise levels LOWER than dataset (e.g. 0.4, 0.2)
 
-            if iteration < start_consistency_step:
+            if epoch < start_consistency_epoch:
                 loss_hard = 0
             else:
                 t_dataset = torch.full((b,), OBSERVED_MASK_PCT, device=device)
@@ -176,7 +176,7 @@ def train():
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optim.step()
             
-            if iteration < start_consistency_step:
+            if epoch < start_consistency_epoch:
                 pbar.set_postfix(easy=loss_easy.item(), iter=iteration)
             else:
                 pbar.set_postfix(easy=loss_easy.item(), hard=loss_hard.item(), iter=iteration)
