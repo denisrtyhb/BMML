@@ -2,7 +2,8 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from unet import UNet
+# from unet import UNet
+from unet2 import MDMUNet
 from corrupt_data import CorruptedMNIST
 import argparse
 import os
@@ -44,7 +45,7 @@ def train():
     dataset = CorruptedMNIST(mask_percentage=OBSERVED_MASK_PCT, train=True)
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=2)
     
-    model = UNet().to(device)
+    model = MDMUNet().to(device)
     
     num_params = sum(p.numel() for p in model.parameters())
     optim = torch.optim.AdamW(model.parameters(), lr=1e-4)

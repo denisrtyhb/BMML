@@ -2,7 +2,8 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from unet import UNet
+# from unet import UNet
+from unet2 import MDMUNet
 from corrupt_data import CorruptedMNIST
 import argparse
 import os
@@ -107,7 +108,7 @@ def train():
     dataset = CorruptedMNIST(mask_percentage=OBSERVED_MASK_PCT, train=True)
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=2)
     
-    model = UNet().to(device)
+    model = MDMUNet().to(device)
     optim = torch.optim.AdamW(model.parameters(), lr=1e-4)
     
     # Track total iterations for evaluation
@@ -117,6 +118,10 @@ def train():
         model.train()
         pbar = tqdm(loader, desc=f"Epoch {epoch+1}")
         
+        easy_loss_total = 0
+        hard_loss_total = 0
+        num_batches = 0
+
         for x_obs, mask_obs, _ in pbar:
             iteration += 1
             # x_obs: -1 (masked) or 0/1 (visible)
@@ -176,10 +181,14 @@ def train():
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optim.step()
             
+            easy_loss_total += loss_easy.item()
+            hard_loss_total += loss_hard.item()
+            num_batches += 1
+
             if epoch < start_consistency_epoch:
-                pbar.set_postfix(easy=loss_easy.item(), iter=iteration)
+                pbar.set_postfix(easy=easy_loss_total/num_batches, iter=iteration)
             else:
-                pbar.set_postfix(easy=loss_easy.item(), hard=loss_hard.item(), iter=iteration)
+                pbar.set_postfix(easy=easy_loss_total/num_batches, hard=hard_loss_total/num_batches, iter=iteration)
             
             # Evaluate every eval_every iterations
         evaluate(model, device, output_folder, iteration, OBSERVED_MASK_PCT)
