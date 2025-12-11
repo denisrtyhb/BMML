@@ -21,7 +21,6 @@ args = parser.parse_args()
 
 n_epochs = getattr(args, "n_epochs", 10)
 output_folder = getattr(args, "output_folder", "outputs")
-eval_every = getattr(args, "eval_every", 1000)
 batch_size = getattr(args, "batch_size", 64)
 device = getattr(args, "device", 'cuda' if torch.cuda.is_available() else 'cpu')
 OBSERVED_MASK_PCT = getattr(args, "observed_mask_pct", 0.1)
@@ -31,7 +30,6 @@ if OBSERVED_MASK_PCT > 1:
 print("Arguments:")
 print(f"n_epochs: {n_epochs}")
 print(f"output_folder: {output_folder}")
-print(f"eval_every: {eval_every}")
 print(f"batch_size: {batch_size}")
 print(f"device: {device}")
 print(f"OBSERVED_MASK_PCT: {OBSERVED_MASK_PCT}")
@@ -49,7 +47,6 @@ def train():
     model = UNet().to(device)
     
     num_params = sum(p.numel() for p in model.parameters())
-    print(f"Number of model parameters: {num_params}")
     optim = torch.optim.AdamW(model.parameters(), lr=1e-4)
     
     # Track total iterations for evaluation
@@ -86,8 +83,6 @@ def train():
             
             # Predict
             pred_logits = model(x_input, t_easy * 1000, final_mask)
-
-            print("Shapes: ", x_input.shape, pred_logits.shape)
             
             # Loss Calculation
             # We only learn on pixels that are:
@@ -96,10 +91,8 @@ def train():
             learnable_region = (final_mask == 1) & (mask_obs == 0)
             
             # Target is x_obs (0.0 or 1.0)
-            print(x_obs.shape, pred_logits.shape)
             loss = F.binary_cross_entropy_with_logits(pred_logits, x_obs, reduction='none')
-            print("Loss shapes: ", loss.shape, learnable_region.shape, t_easy.shape)
-            loss = (loss * learnable_region * t_easy).sum() / (learnable_region.sum() + 1e-6)
+            loss = (loss * learnable_region).sum() / (learnable_region.sum() + 1e-6)
             
             optim.zero_grad()
             loss.backward()
@@ -109,8 +102,7 @@ def train():
             pbar.set_postfix(loss=loss.item(), iter=iteration)
 
             # Evaluate every eval_every iterations
-            if iteration % eval_every == 0:
-                evaluate(model, device, output_folder, iteration, OBSERVED_MASK_PCT)
+        evaluate(model, device, output_folder, iteration, OBSERVED_MASK_PCT)
         # Save the model every 5 epochs
         if (epoch + 1) % 5 == 0:
             torch.save(model.state_dict(), os.path.join(output_folder, f"baseline_mnist_epoch{epoch+1}.pth"))

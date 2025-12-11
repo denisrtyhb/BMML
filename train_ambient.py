@@ -17,18 +17,28 @@ parser.add_argument("--consistency_weight", type=float, default=1.0, help="Weigh
 parser.add_argument("--eval_every", type=int, default=1000, help="Run evaluation every N iterations")
 parser.add_argument("--observed_mask_pct", type=float, default=0.1, help="Percentage of pixels that are observed (not masked) in the dataset")
 parser.add_argument("--batch_size", type=int, default=64, help="Batch size for training")
+parser.add_argument("--start_consistency_step", type=float, default=0, help="Step back for consistency loss")
 args = parser.parse_args()
 
 n_epochs = getattr(args, "n_epochs", 10)
 output_folder = getattr(args, "output_folder", "outputs")
 consistency_weight = getattr(args, "consistency_weight", 1.0)
-eval_every = getattr(args, "eval_every", 1000)
 batch_size = getattr(args, "batch_size", 64)
 device = getattr(args, "device", 'cuda' if torch.cuda.is_available() else 'cpu')
+start_consistency_step = getattr(args, "start_consistency_step", 10000)
+
+
 OBSERVED_MASK_PCT = getattr(args, "observed_mask_pct", 0.1)
 if OBSERVED_MASK_PCT > 1:
     OBSERVED_MASK_PCT = OBSERVED_MASK_PCT / 100
-print(f"Device: {device}")
+print("Arguments:")
+print(f"n_epochs: {n_epochs}")
+print(f"output_folder: {output_folder}")
+print(f"consistency_weight: {consistency_weight}")
+print(f"start_consistency_step: {start_consistency_step}")
+print(f"batch_size: {batch_size}")
+print(f"device: {device}")
+print(f"OBSERVED_MASK_PCT: {OBSERVED_MASK_PCT}")
 
 # Ensure output folder exists
 os.makedirs(output_folder, exist_ok=True)
@@ -64,7 +74,7 @@ def increase_mask_percentage(mask, mask_percentage):
 
     return out_mask_flat.view_as(mask)
 
-def calculate_consistency_loss(model, x_obs, t_obs, device, step_back=0.05):
+def calculate_consistency_loss(model, x_obs, t_obs, device, step_back=0.1):
     """
     CONSISTENCY LOSS (The 'Hard' Part)
     Training for t < t_dataset by ensuring the model makes consistent predictions.
@@ -77,7 +87,6 @@ def calculate_consistency_loss(model, x_obs, t_obs, device, step_back=0.05):
     pred_x0_student_probs = torch.sigmoid(pred_logits_student)
 
     with torch.no_grad():
-        
         pred_x0_hard = torch.bernoulli(pred_x0_student_probs)
         teacher_mask = increase_mask_percentage(mask_obs, step_back)
 
@@ -153,10 +162,12 @@ def train():
             
             # --- TASK 2: HARD LOSS (Consistency) ---
             # Train on noise levels LOWER than dataset (e.g. 0.4, 0.2)
-            t_dataset = torch.full((b,), OBSERVED_MASK_PCT, device=device)
-            loss_hard = calculate_consistency_loss(model, x_obs, t_dataset, device)
-            
-            # Total Loss
+
+            if iteration < start_consistency_step:
+                loss_hard = 0
+            else:
+                t_dataset = torch.full((b,), OBSERVED_MASK_PCT, device=device)
+                loss_hard = calculate_consistency_loss(model, x_obs, t_dataset, device)
     
             loss = loss_easy + loss_hard * consistency_weight
             
@@ -165,11 +176,13 @@ def train():
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optim.step()
             
-            pbar.set_postfix(easy=loss_easy.item(), hard=loss_hard.item(), iter=iteration)
+            if iteration < start_consistency_step:
+                pbar.set_postfix(easy=loss_easy.item(), iter=iteration)
+            else:
+                pbar.set_postfix(easy=loss_easy.item(), hard=loss_hard.item(), iter=iteration)
             
             # Evaluate every eval_every iterations
-            if iteration % eval_every == 0:
-                evaluate(model, device, output_folder, iteration, OBSERVED_MASK_PCT)
+        evaluate(model, device, output_folder, iteration, OBSERVED_MASK_PCT)
         
         # Save the model every 5 epochs
         if (epoch + 1) % 5 == 0:
