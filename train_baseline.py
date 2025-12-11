@@ -57,6 +57,10 @@ def train():
         model.train()
         pbar = tqdm(loader, desc=f"Epoch {epoch+1}")
         
+
+        easy_loss_total = 0
+        num_batches = 0
+
         for x_obs, mask_obs, _ in pbar:
             iteration += 1
             # x_obs: -1 (masked) or 0/1 (visible)
@@ -100,7 +104,9 @@ def train():
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optim.step()
             
-            pbar.set_postfix(loss=loss.item(), iter=iteration)
+            easy_loss_total += loss.item()
+            num_batches += 1
+            pbar.set_postfix(easy=easy_loss_total/num_batches, iter=iteration)
 
             # Evaluate every eval_every iterations
         evaluate(model, device, output_folder, iteration, OBSERVED_MASK_PCT)
